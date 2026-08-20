@@ -6,6 +6,40 @@ versioning with git tags.
 
 ## [Unreleased]
 
+### Added
+
+- **Bar schema v1** (ADR-0010). UTC epoch milliseconds, base volume alongside native quote
+  amount, three retained raw columns, and identity carried by the path and the Parquet metadata
+  rather than by a column repeating itself once per row. Invariants are enforced at parse time,
+  so nothing downstream has to defend against a high below its own open.
+- **Provenance manifests.** A sidecar beside every Parquet file naming every source archive and
+  the checksum the upstream published for it, plus one manifest per pull run recording what
+  landed, what was skipped, what failed, and whether the run was partial.
+- **A Binance Vision loader** (ADR-0012). S3 enumeration rather than a date range, checksums
+  verified before extraction, retries with jittered backoff behind a global concurrency cap, and
+  a monthly/daily seam that must agree value-for-value or fail.
+- **A pinned universe** (ADR-0011), `universe_v1.yaml`, hashed and committed. 200 spot and 100
+  USDT-M symbols ranked on July 2026 quote volume, with leveraged tokens, stable-to-stable pairs,
+  fiat pairs, and anything with less than 12 months of history excluded.
+- **`axiom raw inspect | verify | stats`.** Reproduce a failing series and see the offending
+  rows; re-derive a sample from the archives its manifest names and compare the bytes; reduce the
+  sidecars into the committed QA report.
+- **Two cloud jobs** (ADR-0013), `universe.yml` and `pull.yml` on GitHub Actions, plus a dry-run
+  mode that runs the whole fetch-and-parse path against the real bucket and publishes nothing.
+
+### Changed
+
+- **Off-grid bars are a warning, not a violation.** The first real run failed spot 1h BTCUSDT on
+  43 rows: consecutive hourly bars from 2018-02-09, phase-shifted by 28m14.789s after an exchange
+  restart, each still exactly an hour after the last. They are real bars, so they are kept and
+  counted into `off_grid_count`. Rejecting them would have cost the corpus its most important
+  series; snapping them to the grid would have been imputation.
+- **The minimum-history rule moved to selection time.** Ranking July 2026 volume alone put seven
+  tokenized equities and metals — `NVDAUSDT`, `TSLAUSDT`, `SOXLUSDT` — in the top ten USDT-M
+  perpetuals, and two recently launched stablecoins in the top ten spot pairs. A history rule
+  removes all of it, and the next batch too, without anybody maintaining a list of which tickers
+  are secretly stocks.
+
 ## [0.0.0] - 2026-08-20
 
 First version. A private monorepo and a proven develop-local, execute-remote loop: one command

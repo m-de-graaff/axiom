@@ -1,0 +1,69 @@
+# Create the private Hugging Face datasets this project needs, and seed their front pages.
+#
+# Idempotent: `exist_ok=True` on every create, and the README is uploaded whether or not the repo
+# was new. Running it twice is a no-op with a fresh commit on the README.
+#
+# It lives here rather than in a shell history because docs/REPOS.md's same-day rule says every
+# repo that exists online is documented on the day it is created — and a workflow is documentation
+# that runs.
+
+name: bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Which dataset to create.
+        type: choice
+        options: [axiom-raw]
+        default: axiom-raw
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv sync --frozen
+
+      - name: Create and seed the dataset
+        env:
+          AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
+          REPO: ${{ inputs.repo }}
+        run: |
+          uv run python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from huggingface_hub import HfApi
+
+          from axiom.config.settings import AxiomSettings
+
+          settings = AxiomSettings()
+          api = HfApi(token=settings.hf_token.get_secret_value())
+          repo_id = f"{settings.hf_namespace}/{os.environ['REPO']}"
+
+          print("whoami:", api.whoami()["name"])
+          api.create_repo(repo_id=repo_id, repo_type="dataset", private=True, exist_ok=True)
+
+          readme = Path(f"remote/hf/{os.environ['REPO']}-README.md")
+          api.upload_file(
+              path_or_fileobj=readme,
+              path_in_repo="README.md",
+              repo_id=repo_id,
+              repo_type="dataset",
+              commit_message="seed: layout, schema, and the not-for-redistribution policy",
+          )
+
+          info = api.repo_info(repo_id, repo_type="dataset")
+          print(f"{repo_id}: private={info.private} files={[f.rfilename for f in info.siblings]}")
+          assert info.private, "the dataset must not be public"
+          PY
