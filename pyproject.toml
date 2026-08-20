@@ -24,6 +24,9 @@ kaggle = ["kaggle>=1.6"]
 # tests drive every loader through a synthetic fetcher, so a broker client in CI would buy
 # nothing but a network dependency in a suite that must not have one.
 data = ["dukascopy-python>=4.0.1", "pandas>=2.2"]
+# `axiom registry query` only. The canned reports are group-bys over a few thousand rows and run
+# on pyarrow alone; a SQL engine earns its place when the question is arbitrary.
+query = ["duckdb>=1.1"]
 modalrun = ["modal>=0.68"]
 dev = [
     "pytest>=8.0",
@@ -31,6 +34,7 @@ dev = [
     "ruff>=0.9",
     "pre-commit>=4.0",
     "ty>=0.0.1a1",
+    "duckdb>=1.1",
 ]
 
 [project.scripts]

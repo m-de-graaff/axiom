@@ -23,11 +23,13 @@ loop_app = typer.Typer(no_args_is_help=True, help="The v0.0 dispatch/checkpoint/
 universe_app = typer.Typer(no_args_is_help=True, help="Build and inspect the pinned universe.")
 pull_app = typer.Typer(no_args_is_help=True, help="Land source data in the raw tier.")
 raw_app = typer.Typer(no_args_is_help=True, help="Inspect, verify and summarize the raw tier.")
+registry_app = typer.Typer(no_args_is_help=True, help="Build and query the corpus registry.")
 app.add_typer(config_app, name="config")
 app.add_typer(loop_app, name="loop")
 app.add_typer(universe_app, name="universe")
 app.add_typer(pull_app, name="pull")
 app.add_typer(raw_app, name="raw")
+app.add_typer(registry_app, name="registry")
 
 
 def _csv(value: str) -> list[str]:
@@ -656,6 +658,118 @@ def raw_stats(
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(report, encoding="utf-8")
         typer.echo(f"wrote {out}")
+
+
+@registry_app.command("build")
+def registry_build(
+    dest: Annotated[
+        Path | None,
+        typer.Option("--dest", help="Build over a local raw tier and write the result there."),
+    ] = None,
+    concurrency: Annotated[
+        int, typer.Option("--concurrency", help="Simultaneous sidecar downloads.")
+    ] = 16,
+) -> None:
+    """Reduce every sidecar in `axiom-raw` to one queryable table, and upload it back.
+
+    Idempotent: rebuilding from an unchanged tier reproduces the same `registry_hash`. The
+    sidecars stay the truth — this is a cache with no authority, built so that questions are
+    cheap rather than so that facts live in two places.
+
+    A sidecar that cannot be read is reported into `registry/bad_sidecars.json` and the command
+    exits non-zero. A registry that silently omits what it could not parse is worse than none,
+    because the omission looks exactly like absence.
+    """
+    from axiom.config.settings import AxiomSettings
+    from axiom.raw.store import LocalRawStore
+    from axiom.registry import (
+        REGISTRY_PATH,
+        SUMMARY_PATH,
+        build_from_manifests,
+        build_registry,
+        summary_markdown,
+        write_registry_parquet,
+    )
+    from axiom.registry.build import bad_sidecars_json
+
+    setup_logging()
+    if dest is not None:
+        store = LocalRawStore(dest)
+        build = build_from_manifests(store.list_manifests())
+    else:
+        from huggingface_hub import HfApi
+
+        settings = AxiomSettings()
+        token = settings.hf_token.get_secret_value() if settings.hf_token else None
+        build = build_registry(
+            HfApi(token=token), settings.raw_repo_id, token=token, concurrency=concurrency
+        )
+
+    parquet = write_registry_parquet(build.table, registry_hash_value=build.registry_hash)
+    summary = summary_markdown(
+        build.table, registry_hash=build.registry_hash, bad_count=len(build.bad)
+    )
+
+    if dest is not None:
+        for path, payload in (
+            (REGISTRY_PATH, parquet),
+            (SUMMARY_PATH, summary.encode("utf-8")),
+        ):
+            target = Path(dest) / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(payload)
+    else:
+        store = _raw_store(None)
+        store.upload_bytes(REGISTRY_PATH, parquet)
+        store.upload_json(SUMMARY_PATH, summary)
+        if build.bad:
+            store.upload_json("registry/bad_sidecars.json", bad_sidecars_json(build.bad))
+
+    typer.echo(summary)
+    typer.echo(f"registry_hash: {build.registry_hash} ({build.table.num_rows} artifacts)")
+    for entry in build.bad:
+        typer.echo(f"  UNREADABLE {entry.path}: {entry.error}", err=True)
+    if build.bad:
+        raise typer.Exit(1)
+
+
+@registry_app.command("query")
+def registry_query(
+    sql: Annotated[
+        str,
+        typer.Argument(help="SQL over the registry, which is available as the table `registry`."),
+    ],
+    dest: Annotated[
+        Path | None, typer.Option("--dest", help="Query a local registry instead.")
+    ] = None,
+    limit: Annotated[int, typer.Option("--limit", help="Rows to print.")] = 50,
+) -> None:
+    """Run arbitrary SQL over the registry.
+
+    The canned reports in `axiom registry build` cover what/from-where/pulled-when. This is for
+    everything else — needs the `query` extra (`uv sync --extra query`).
+    """
+    from axiom.registry import REGISTRY_PATH, read_registry
+
+    setup_logging()
+    try:
+        import duckdb
+    except ImportError:
+        typer.echo("duckdb is not installed; run `uv sync --extra query`", err=True)
+        raise typer.Exit(2) from None
+
+    if dest is not None:
+        data = (Path(dest) / REGISTRY_PATH).read_bytes()
+    else:
+        data = _raw_store(None).get(REGISTRY_PATH)
+        if data is None:
+            typer.echo("no registry in the raw tier; run `axiom registry build`", err=True)
+            raise typer.Exit(2)
+
+    # DuckDB resolves a bare table name against Arrow objects in the caller's scope, so the
+    # registry is queryable as `registry` without registering or copying anything.
+    registry = read_registry(data)  # noqa: F841
+    typer.echo(duckdb.sql(sql).limit(limit))
 
 
 if (

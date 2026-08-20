@@ -1,0 +1,74 @@
+# The v0.2 Stooq pull: US daily equities, from a handed-over archive URL.
+#
+# Stooq gates the bulk dump behind a CAPTCHA, so a human does the one thing only a human can:
+# solves it and copies the resulting direct URL. Everything after that happens here. The archive
+# bytes never touch the laptop (ADR-0016).
+#
+# The URL is a dispatch input rather than a secret because it is short-lived and specific to one
+# download, and putting it in the repo's secrets would outlive its usefulness by months. It does
+# appear in this private repo's run log; treat a leaked one as costing nothing beyond a re-solve.
+
+name: pull-stooq
+
+on:
+  workflow_dispatch:
+    inputs:
+      archive_url:
+        description: Direct archive URL, copied from the browser after solving the CAPTCHA.
+        required: true
+      from_staging:
+        description: >-
+          ADR-0016 fallback. Path in axiom-raw to read the archive from, e.g.
+          staging/stooq/d_us_txt.zip. Only when the handed-over URL is bound to the IP that
+          solved the CAPTCHA. Setting this makes the run flag staging_exception_used.
+        default: ""
+      limit:
+        description: Tickers, in archive order. Empty means the whole dump.
+        default: ""
+      symbols:
+        description: Comma-separated tickers, for smoke runs. Empty means all of them.
+        default: ""
+      dry_run:
+        description: >-
+          Write to the runner's disk instead of the Hub. This is the URL-handoff smoke: it
+          answers whether the handed-over URL is dereferenceable from a host that is not the one
+          that solved the CAPTCHA, and it exercises the whole parse without publishing anything.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pull-stooq
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # No extras: Stooq is a zip and a CSV parser, both of which are already dependencies.
+      - run: uv sync --frozen
+
+      - name: Pull Stooq into axiom-raw
+        env:
+          AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
+          AXIOM_GIT_COMMIT: ${{ github.sha }}
+          AXIOM_STAGING_DIR: ${{ runner.temp }}/axiom-raw-staging
+          AXIOM_DISABLE_TRACKING: "1"
+        run: |
+          uv run axiom pull stooq \
+            --backend-tag github \
+            ${{ inputs.from_staging
+                && format('--from-staging {0}', inputs.from_staging)
+                || format('--archive-url ''{0}''', inputs.archive_url) }} \
+            ${{ inputs.symbols && format('--symbols {0}', inputs.symbols) || '' }} \
+            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }} \
+            ${{ inputs.dry_run && format('--dest {0}/raw-dryrun', runner.temp) || '' }}

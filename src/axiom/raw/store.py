@@ -182,8 +182,17 @@ class HubRawStore:
 
     def upload_json(self, path_in_repo: str, text: str) -> None:
         """Write one small file directly, outside the batching. Used for run manifests."""
+        self.upload_bytes(path_in_repo, text.encode("utf-8"))
+
+    def upload_bytes(self, path_in_repo: str, data: bytes) -> None:
+        """Write one file directly, outside the batching.
+
+        Used for things that are not bar artifacts and have no sidecar -- run manifests, the
+        corpus registry -- so they are not worth staging into a batch that exists to amortize
+        commits over thousands of small files.
+        """
         self._api.upload_file(
-            path_or_fileobj=text.encode("utf-8"),
+            path_or_fileobj=data,
             path_in_repo=path_in_repo,
             repo_id=self.repo_id,
             repo_type="dataset",

@@ -124,6 +124,36 @@ dukascopy-log:
 dukascopy-kill:
     gh run cancel $(gh run list --workflow=pull-dukascopy.yml --limit 1 --json databaseId -q '.[0].databaseId')
 
+# --- the v0.2 Stooq pull ---
+
+# The URL-handoff smoke: download from the runner and parse, publishing nothing.
+stooq-smoke url limit="500":
+    gh workflow run pull-stooq.yml -f dry_run=true -f archive_url='{{url}}' -f limit={{limit}}
+
+# The real pull. Solve the CAPTCHA at https://stooq.com/db/h/ and pass the resulting direct URL.
+pull-stooq url:
+    gh workflow run pull-stooq.yml -f archive_url='{{url}}'
+
+stooq-watch:
+    gh run watch $(gh run list --workflow=pull-stooq.yml --limit 1 --json databaseId -q '.[0].databaseId') --exit-status
+
+stooq-log:
+    gh run view $(gh run list --workflow=pull-stooq.yml --limit 1 --json databaseId -q '.[0].databaseId') --log
+
+# --- the v0.2 corpus registry ---
+
+# Rebuild the registry over every sidecar in axiom-raw. Run after every pull.
+registry-build:
+    gh workflow run registry.yml
+
+# Build over a local raw tier instead, for development.
+registry-local dest=".artifacts/raw-local":
+    uv run axiom registry build --dest {{dest}}
+
+# Arbitrary SQL over the registry. Needs `uv sync --extra query`.
+registry-query sql:
+    uv run axiom registry query "{{sql}}"
+
 # Create the private axiom-raw dataset and seed its front page. Idempotent.
 bootstrap-raw:
     gh workflow run bootstrap.yml -f repo=axiom-raw
