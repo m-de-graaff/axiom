@@ -14,16 +14,16 @@ on:
       command:
         description: What to run.
         type: choice
-        options: [inspect, verify, stats]
+        options: [inspect, verify, stats, crosscheck]
         default: inspect
       symbol:
-        description: inspect only — the symbol to look at.
+        description: inspect and crosscheck — the symbol(s) to look at, comma-separated.
         default: BTCUSDT
       market:
-        description: inspect only — spot or um.
+        description: inspect and crosscheck — spot or um.
         default: spot
       frequency:
-        description: inspect only — 1h or 1d.
+        description: inspect and crosscheck — 1h or 1d.
         default: 1h
       sample:
         description: verify only — how many series to re-derive.
@@ -52,6 +52,11 @@ jobs:
 
       - run: uv sync --frozen
 
+      # An independent implementation, installed only for the cross-check so its dependency tree
+      # never touches the environment the loader runs in (ADR-0012).
+      - if: inputs.command == 'crosscheck'
+        run: uv pip install binance_historical_data
+
       - name: Run the raw-tier command
         env:
           AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
@@ -74,10 +79,16 @@ jobs:
             stats)
               uv run axiom raw stats --out docs/reports/v0.1-raw-qa.md
               ;;
+            crosscheck)
+              uv run python remote/crosscheck/against_binance_historical_data.py \
+                --symbols '${{ inputs.symbol }}' \
+                --frequency '${{ inputs.frequency }}' \
+                --market '${{ inputs.market }}'
+              ;;
           esac
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: inputs.command != 'inspect'
+        if: inputs.command == 'verify' || inputs.command == 'stats'
         with:
           name: v0.1-raw-qa
           path: docs/reports/v0.1-raw-qa.md

@@ -123,3 +123,7 @@ raw-stats:
 # Download the newest QA report the raw workflow produced.
 raw-report-fetch:
     gh run download $(gh run list --workflow=raw.yml --limit 1 --json databaseId -q '.[0].databaseId') -n v0.1-raw-qa -D docs/reports
+
+# ADR-0012 safety net: diff axiom-raw against an independent implementation.
+raw-crosscheck symbols="BTCUSDT,ETHUSDT,SOLUSDT":
+    gh workflow run raw.yml -f command=crosscheck -f symbol={{symbols}}
