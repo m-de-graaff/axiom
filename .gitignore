@@ -1,0 +1,27 @@
+# Environments
+.venv/
+__pycache__/
+*.py[cod]
+
+# Secrets — never in history
+.env
+*.env
+.kaggle/
+kaggle.json
+
+# Data and artifacts — never in history
+data/
+checkpoints/
+runs/
+*.parquet
+*.safetensors
+*.pt
+
+# Build / tool caches
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.ty_cache/

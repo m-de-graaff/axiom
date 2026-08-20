@@ -1,0 +1,19 @@
+Axiom
+Copyright (c) 2026 Mark de Graaff
+Licensed under the MIT License (see LICENSE).
+
+--------------------------------------------------------------------------
+Third-party code
+--------------------------------------------------------------------------
+
+As of v0.0 this repository vendors no third-party source.
+
+From v0.5 onward it will vendor components from Kronos
+(https://github.com/shiyu-coder/Kronos), Copyright (c) shiyu-coder,
+licensed under the MIT License. Specifically: the BSQuantizer and the
+tokenizer encoder/decoder (v0.5), and the autoregressive decoder in
+model/kronos.py (v0.7). The Kronos copyright notice and license text will
+be reproduced in this file alongside the vendored sources at that time.
+
+This placeholder exists so the attribution obligation is recorded on day
+one rather than discovered at vendoring time.

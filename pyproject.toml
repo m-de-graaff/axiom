@@ -1,0 +1,58 @@
+[project]
+name = "axiom"
+version = "0.0.0"
+description = "K-line foundation model: discretize-then-autoregress over OHLCV bars."
+readme = "README.md"
+authors = [{ name = "m-de-graaff", email = "mark_degraaff@outlook.com" }]
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "pydantic-settings>=2.7",
+    "pyyaml>=6.0",
+    "typer>=0.15",
+    "huggingface-hub>=0.27",
+    "trackio>=0.2",
+]
+
+[project.optional-dependencies]
+train = ["torch>=2.4", "numpy>=1.26"]
+kaggle = ["kaggle>=1.6"]
+modalrun = ["modal>=0.68"]
+dev = [
+    "pytest>=8.0",
+    "hypothesis>=6.100",
+    "ruff>=0.9",
+    "pre-commit>=4.0",
+    "ty>=0.0.1a1",
+]
+
+[project.scripts]
+axiom = "axiom.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.9.26,<0.10.0"]
+build-backend = "uv_build"
+
+# Laptop and CI must never pull CUDA wheels. Cloud images bring their own torch.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ty.src]
+include = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: end-to-end drills that run a full loop"]
+filterwarnings = ["ignore::DeprecationWarning"]
