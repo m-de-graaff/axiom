@@ -108,7 +108,12 @@ The slow drills are marked: `uv run pytest -m slow` runs only the kill-and-resum
 | `just pull-watch` | Follows the newest pull to completion |
 | `just pull-log` | Downloads the newest pull's log |
 | `just pull-kill` | Cancels the newest pull mid-flight — a real SIGKILL, for the resume drill |
+| `just pull-dryrun` | The whole fetch, checksum, parse and validate path against the real bucket, writing to the runner and publishing nothing |
 | `just pull-local` | Pulls into `.artifacts/raw-local`. **Development only** — this writes market data to the machine it runs on, which the laptop must never do |
+| `just bootstrap-raw` | Creates the private `axiom-raw` dataset and seeds its front page. Idempotent |
+| `just raw-inspect SYMBOL` | Fetches one series and prints what failed validation. Writes nothing |
+| `just raw-verify` | Re-derives a sample and compares the bytes |
+| `just raw-stats` | Regenerates the QA report from the sidecars |
 
 The narrowing flags are for smoke runs:
 

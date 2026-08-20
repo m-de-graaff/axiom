@@ -103,3 +103,23 @@ pull-kill:
 # the machine it runs on, which the laptop must never do.
 pull-local symbols="BTCUSDT":
     uv run axiom pull binance --symbols {{symbols}} --markets spot --dest .artifacts/raw-local
+
+# Create the private axiom-raw dataset and seed its front page. Idempotent.
+bootstrap-raw:
+    gh workflow run bootstrap.yml -f repo=axiom-raw
+
+# Fetch one series and print what failed validation. Writes nothing anywhere.
+raw-inspect symbol market="spot" frequency="1h":
+    gh workflow run raw.yml -f command=inspect -f symbol={{symbol}} -f market={{market}} -f frequency={{frequency}}
+
+# Re-derive a sample of series and compare the bytes against their manifests.
+raw-verify sample="10":
+    gh workflow run raw.yml -f command=verify -f sample={{sample}}
+
+# Regenerate the QA report from the sidecars.
+raw-stats:
+    gh workflow run raw.yml -f command=stats
+
+# Download the newest QA report the raw workflow produced.
+raw-report-fetch:
+    gh run download $(gh run list --workflow=raw.yml --limit 1 --json databaseId -q '.[0].databaseId') -n v0.1-raw-qa -D docs/reports

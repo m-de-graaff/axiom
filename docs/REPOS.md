@@ -50,21 +50,30 @@ implemented.
 
 ### `axiom-raw` is blocked on a token permission
 
-`create_repo` returns `403 Forbidden: You don't have the rights to create a dataset under the
-namespace "m-de-graaff"`. The `axiom-write` fine-grained token has write access to the `axiom-*`
-repos that already exist, and no permission to create new ones under the namespace.
+`create_repo` returns:
 
-Two ways out, either is fine:
+```
+403 Forbidden: You don't have the rights to create a dataset under the namespace "m-de-graaff"
+```
 
-1. Add **Create repos** to the `axiom-write` token at
-   <https://huggingface.co/settings/tokens>, then run
-   `uv run python -c "from axiom.config.settings import AxiomSettings; from huggingface_hub import HfApi; s=AxiomSettings(); HfApi(token=s.hf_token.get_secret_value()).create_repo(s.raw_repo_id, repo_type='dataset', private=True)"`.
+Checked from both sides. The laptop's `.env` token and the `AXIOM_HF_TOKEN` repository secret are
+the same fine-grained `axiom-write` token, both authenticate as `m-de-graaff`, and both are
+refused. It has write access to the `axiom-*` repos that already exist and no permission to
+create new ones under the namespace.
+
+**This blocks the rest of v0.1**: the smoke run, the kill drill, the full pull, `raw verify`,
+`raw stats`, the QA report, and the tag all need somewhere to write.
+
+Two ways out, either is fine and neither needs code:
+
+1. Add **Create repos** (write access to all repos under the namespace) to the `axiom-write`
+   token at <https://huggingface.co/settings/tokens>.
 2. Create the dataset by hand at <https://huggingface.co/new-dataset> — name `axiom-raw`, owner
    `m-de-graaff`, **Private** — and confirm the token's repo scope covers it.
 
-Either way, seed its front page afterwards from `remote/hf/axiom-raw-README.md`, which is the
-versioned source of truth for it. Nothing else in v0.1 needs the token widened: the pull writes
-to the dataset once it exists.
+Then run `just bootstrap-raw`, which creates the dataset if it is still missing and seeds its
+front page from `remote/hf/axiom-raw-README.md` — the versioned source of truth for it. The job
+is idempotent, so it is safe either way, and it asserts the dataset is private before it exits.
 
 ## Execution backends
 
