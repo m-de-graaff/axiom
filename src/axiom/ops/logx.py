@@ -33,6 +33,10 @@ def setup_logging(level: str | None = None) -> None:
         stream=sys.stdout,
         force=True,
     )
+    # httpx logs a line per request. Reading 600 sidecars buries every line that matters, so
+    # these speak only when something is wrong.
+    for noisy in ("httpx", "urllib3", "filelock", "huggingface_hub"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def git_commit() -> str:

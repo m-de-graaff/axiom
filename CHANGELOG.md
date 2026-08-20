@@ -6,6 +6,31 @@ versioning with git tags.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-20
+
+The canonical bar schema, the provenance-manifest system, and a checksum-verified, resumable
+Binance loader that ran cloud-to-cloud and landed 600 series in a new private dataset.
+
+The laptop never held a market-data byte. Every fixture in the test suite is a synthetic zip built
+in-test, every real byte was fetched by a runner and written to the Hub, and `git status` is clean.
+
+### Verified
+
+600 series in `m-de-graaff/axiom-raw`: 200 spot and 100 USDT-M perpetual symbols at 1h and 1d,
+10,885,159 bars, 0.57 GiB. **225 distinct symbols are present at both frequencies with at least a
+year of history**; the exit gate asks for 100.
+
+Re-pull reproducibility: **10/10** sampled series rebuilt byte-identically from the archives their
+manifests name. Cross-check against `binance_historical_data`: **3/3** agree on row counts and on
+every OHLCV value of a sampled day. The full pull finished `ok=440 skipped=160 failed=0`, with no
+unexplained failures because there were no failures.
+
+The kill drill was a real `gh run cancel`, which SIGKILLs the runner. 30 series had been built and
+29 committed; the relaunch was the same dispatch with no resume flag, because there is no resume
+flag, and reported `ok=131 skipped=29 failed=0`.
+
+Zero Kaggle GPU-hours. Zero Modal spend — Modal still has no account (ADR-0013).
+
 ### Added
 
 - **Bar schema v1** (ADR-0010). UTC epoch milliseconds, base volume alongside native quote
@@ -39,6 +64,22 @@ versioning with git tags.
   perpetuals, and two recently launched stablecoins in the top ten spot pairs. A history rule
   removes all of it, and the next batch too, without anybody maintaining a list of which tickers
   are secretly stocks.
+
+### Known limitations
+
+- **Still not Modal.** The pull runs on GitHub Actions (ADR-0013), which shares an account and an
+  outage with the code host, so backend #2 still does not deliver the vendor independence the
+  roadmap wanted. Deferred again to v0.6, where the pre-tokenization map job will set requirements
+  a data pull does not.
+- **Byte-identity is conditional on the writer.** `artifact_sha256` is the hash of Parquet bytes,
+  and pyarrow stamps its own version into every file it writes. The 10/10 result holds for a given
+  pyarrow; a major upgrade will change the hashes without changing a single bar. The manifest's
+  content identity (`manifest_sha256`) is unaffected, which is why it is the field the Parquet
+  metadata carries.
+- **Selection-month bias.** The universe is ranked on one month's volume, so a pair that was
+  dominant in 2021 and is quiet now can miss the cut despite years of good history (ADR-0011).
+- **No corpus registry.** Answering "what do we have" means reading 600 sidecars. That is fine at
+  this size and is what v0.2 replaces.
 
 ## [0.0.0] - 2026-08-20
 

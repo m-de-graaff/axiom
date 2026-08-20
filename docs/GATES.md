@@ -3,6 +3,65 @@
 One section per gate, written when the gate is passed. Each claim names the evidence, so a number
 in the eventual model card can be traced back to the run that produced it.
 
+## v0.1 "Schema & First Bars" — exit checklist passed 2026-08-20
+
+**The gate:** roadmap §4/v0.1 — at least 100 liquid Binance pairs at both 1h and 1d in a private
+`axiom-raw` with manifests, a re-pull that is byte-identical or produces a documented manifest
+diff, and zero bytes on the laptop.
+
+### Checklist
+
+| Item | Status | Evidence |
+|---|---|---|
+| ≥ 100 pairs at **both** 1h and 1d with ≥ 365 days of history | Pass | 225 distinct symbols (200 spot, 100 um, 75 in both markets) |
+| `universe_v1.yaml` committed with a hash; every manifest references it | Pass | `universe_hash=2de32d7d4f27` in the config and in sampled sidecars across both markets |
+| Re-pull sample byte-identical on monthly content | Pass | `axiom raw verify --sample 10 --seed 1337`: 10/10 |
+| Daily-tail divergence reported as a manifest diff, not a failure | Pass | `VerifyResult.status="drifted"`; no sampled series had drifted at verify time |
+| Pull kill drill passed, resume via sidecars | Pass | `gh run cancel` at 30 built / 29 committed; relaunch `ok=131 skipped=29 failed=0` |
+| All loader/schema/manifest tests green in CI; no live network in CI | Pass | 188 tests, lint and types green across Python 3.11–3.13 |
+| Cross-check against an independent implementation recorded | Pass | `binance_historical_data`, 3/3 agree on rows and on every OHLCV value of 2024-02-14 |
+| QA report committed; invariant violations = 0; storage < 2 GB | Pass | `docs/reports/v0.1-raw-qa.md`; 0 violations by construction; 0.57 GiB |
+| Zero market-data bytes on laptop or home PC | Pass | No Parquet outside the runners; `.artifacts/` holds three markdown files |
+| Zero Kaggle GPU-hours; Modal spend < $5 | Pass | Kaggle never ran; Modal has no account, $0 |
+| `docs/REPOS.md` lists `axiom-raw` (private); nothing public | Pass | Created private 2026-08-20, `repo_info` reports `private=True` |
+
+### The numbers
+
+| Run | Result |
+|---|---|
+| Smoke (`--symbols BTCUSDT,ETHUSDT --markets spot`) | `ok=4 skipped=0 failed=0`, 164,238 bars |
+| Kill drill, killed | 30 series built, 29 committed, cancelled at 7m01s |
+| Kill drill, relaunched | `ok=131 skipped=29 failed=0`, 2,517,297 bars |
+| Full pull | `ok=440 skipped=160 failed=0`, 7,447,699 bars, 406,897,096 bytes |
+| Corpus total | 600 series, 10,885,159 bars, 0.57 GiB |
+
+### Deviations from the v0.1 plan
+
+1. **The pull runs on GitHub Actions, not Modal** (ADR-0013). Modal's account is still behind the
+   review gate that ADR-0009 recorded at v0.0, so there is no Modal token to run anything with.
+   The vendor-independence half of backend #2 is still undelivered and is deferred again to v0.6.
+2. **ADRs are numbered 0010–0012**, not 0009–0011. The v0.0 backend substitution took 0009.
+3. **Off-grid timestamps are a warning, not a violation.** The first run against the real bucket
+   failed spot 1h BTCUSDT on 43 phase-shifted bars from an exchange restart. Rejecting them would
+   have cost the corpus its most important series; snapping them to the grid would have been
+   imputation. They are counted into `off_grid_count` instead (ADR-0010).
+4. **The minimum-history rule is applied at selection time**, not after the pull. ADR-0011
+   originally deferred it on reasoning that turned out to be wrong: the listing's earliest month
+   *is* the start of the series. Applying it early also removed seven tokenized equities that had
+   taken the top of the USDT-M volume ranking.
+5. **`configs/universe_v1.yaml` lives at `src/axiom/configs/`**, inheriting the v0.0 deviation
+   that moved configs inside the package so cloud kernels can reach them from a wheel.
+
+### Settled by this gate
+
+`data.binance.vision` publishes phase-shifted bars after an exchange restart, and both the
+timestamp grid and the CSV header presence vary within one bucket. Detection beats assumption for
+all three.
+
+Byte-identity is conditional on the Parquet writer's version, which pyarrow stamps into every
+file. The manifest's own content hash is not, which is why that is the field the Parquet metadata
+carries and the field the idempotence test compares.
+
 ## G1 — v0.0 "Spine & Loop" — passed 2026-08-20
 
 **The gate:** kill-and-resume produces a final state bit-identical to an uninterrupted run, on a
