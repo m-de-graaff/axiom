@@ -40,10 +40,10 @@ loop-kaggle:
     uv run kaggle kernels push -p remote/kaggle/loop_test
 
 loop-kaggle-status:
-    uv run kaggle kernels status m-de-graaff/axiom-loop-test
+    uv run kaggle kernels status markdgraaff/axiom-loop-test
 
 loop-kaggle-log:
-    uv run kaggle kernels output m-de-graaff/axiom-loop-test -p .artifacts/kaggle-out
+    uv run kaggle kernels output markdgraaff/axiom-loop-test -p .artifacts/kaggle-out
 
 # Dispatch to Modal (CPU, backend #2).
 loop-modal:

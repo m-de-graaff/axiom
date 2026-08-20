@@ -6,8 +6,8 @@ Operational procedures: tokens, dispatch, and what to do when a cloud session di
 
 | Token | Scope | Where it lives | Expiry | Rotation |
 |---|---|---|---|---|
-| GitHub fine-grained PAT `axiom-kaggle-read` | Repository access: only `axiom`. Permissions: Contents **read-only** | Password manager; Kaggle secret `GH_PAT`; Modal secret `axiom-gh` | 90 days | Regenerate in GitHub, update both cloud secrets, revoke the old one |
-| Hugging Face fine-grained token `axiom-write` | Write, scoped to repos matching `axiom-*` only | Password manager; laptop `.env` as `AXIOM_HF_TOKEN`; Kaggle secret `HF_TOKEN`; Modal secret `axiom-hf` | 90 days | Create the new token first, update all three consumers, then revoke |
+| GitHub fine-grained PAT `axiom-kaggle-read` | Repository access: only `m-de-graaff/axiom`. Permissions: Contents read-only, Metadata read-only | Laptop `.env` as `AXIOM_GH_PAT`; Kaggle secret `GH_PAT`; Modal secret `axiom-gh` | **2026-11-18** | Regenerate in GitHub, update `.env` and both cloud secrets, revoke the old one |
+| Hugging Face fine-grained token `axiom-write` | Read + write on `datasets/m-de-graaff/axiom-runs` only. Every user-level and org-level permission left unchecked | Laptop `.env` as `AXIOM_HF_TOKEN`; Kaggle secret `HF_TOKEN`; Modal secret `axiom-hf` | 90 days from 2026-08-20 | Create the new token first, update all three consumers, then revoke |
 | Kaggle API token (`kaggle.json`) | Full account API access | Laptop only, `~/.kaggle/kaggle.json`, chmod 600 | No expiry | Expire from Kaggle account settings, download a fresh one |
 | Modal token | Full workspace access | Laptop only, via `modal token new` | No expiry | `modal token new` reissues; revoke the old one in the Modal dashboard |
 
@@ -48,8 +48,23 @@ Kaggle and Modal tokens are revoked from their respective account pages.
 ```sh
 uv sync --all-extras
 uv run pre-commit install
-printf 'AXIOM_HF_TOKEN=hf_...\n' > .env      # gitignored
-uv run python -c "from huggingface_hub import HfApi; print(HfApi().whoami()['name'])"
+```
+
+`.env` (gitignored, never committed) holds two values:
+
+```
+AXIOM_HF_TOKEN=hf_...          # the axiom-write token
+AXIOM_GH_PAT=github_pat_...    # the axiom-kaggle-read PAT, for pasting into cloud secret stores
+```
+
+Only `AXIOM_HF_TOKEN` is read by the package. `AXIOM_GH_PAT` is kept here purely so the value is
+recoverable when a cloud secret store needs it — the laptop never uses it to clone, because `gh`
+already has its own credentials.
+
+Verify both:
+
+```sh
+uv run python -c "from huggingface_hub import HfApi; from axiom.config.settings import AxiomSettings; s=AxiomSettings(); print(HfApi(token=s.hf_token.get_secret_value()).whoami()['name'])"
 ```
 
 Recorded toolchain versions on the laptop as of v0.0: git 2.55.0, uv 0.9.26, gh 2.97.0,
@@ -80,9 +95,16 @@ The slow drills are marked: `uv run pytest -m slow` runs only the kill-and-resum
 
 ### Before the first Kaggle dispatch
 
-1. Phone-verify the Kaggle account, or internet-enabled kernels and secrets are unavailable.
-2. Add both secrets under Add-ons → Secrets in the kernel editor: `GH_PAT` and `HF_TOKEN`.
-3. `uv run kaggle kernels push -p remote/kaggle/loop_test` (or `just loop-kaggle`).
+**The Kaggle username is `markdgraaff`, not `m-de-graaff`.** GitHub and Hugging Face both use
+`m-de-graaff`; Kaggle does not. The kernel id in `kernel-metadata.json` reflects this.
+
+1. **Phone-verify the account.** As of 2026-08-20 it is not verified, and without it Kaggle offers
+   neither internet-enabled kernels nor user secrets — so every step below is blocked. Settings →
+   Account → Phone verify. This needs a real phone and an SMS code, so it cannot be automated.
+2. Settings → API Tokens → Generate New Token, saved to `~/.kaggle/kaggle.json`, chmod 600.
+3. Add both secrets under Add-ons → Secrets in the kernel editor: `GH_PAT` (the GitHub PAT) and
+   `HF_TOKEN` (the Hugging Face token). Both values are in the laptop's `.env`.
+4. `uv run kaggle kernels push -p remote/kaggle/loop_test` (or `just loop-kaggle`).
 
 The kernel prints its Python and torch versions on startup. **Record them in this file and amend
 ADR-0007 if Kaggle's Python is below the 3.11 floor.**

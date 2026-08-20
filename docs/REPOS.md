@@ -6,6 +6,19 @@ on the day it is created. A repo that exists but is not listed here is a documen
 **Everything is private.** Nothing becomes public before the Publish Gate, which is a separate
 decision after v1.0.
 
+## Account names differ per service
+
+They are not interchangeable, and assuming they are cost one debugging round already.
+
+| Service | Username |
+|---|---|
+| GitHub | `m-de-graaff` |
+| Hugging Face | `m-de-graaff` |
+| Kaggle | `markdgraaff` |
+
+`AxiomSettings.hf_namespace` defaults to `m-de-graaff` and is correct for Hugging Face. The Kaggle
+kernel id in `remote/kaggle/loop_test/kernel-metadata.json` uses `markdgraaff`.
+
 ## Status legend
 
 - **Live** — created and in use.
@@ -29,7 +42,7 @@ implemented.
 
 | Repo | Type | Visibility | Created in | Status | Holds |
 |---|---|---|---|---|---|
-| `axiom-runs` | dataset | Private | v0.0 | Pending | Checkpoints, run manifests, `latest.json` resume pointers |
+| `axiom-runs` | dataset | Private | v0.0 | **Live** (2026-08-20) | Checkpoints, run manifests, `latest.json` resume pointers |
 | `axiom-trackio` | space | Private | v0.0 (optional) | Pending | trackio dashboard sync. trackio may auto-create a backing dataset; if it does, add it to this table. |
 | `axiom-raw` | dataset | Private | v0.1 | Planned | Cleaned-source Parquet plus provenance manifests |
 | `axiom-tokenized` | dataset | Private → public at Publish Gate | v0.6 | Planned | Pre-tokenized MDS shards |
@@ -39,7 +52,7 @@ implemented.
 
 | Service | What it is | Created in | Status | Notes |
 |---|---|---|---|---|
-| Kaggle | Execution backend #1 (GPU from v0.5) | v0.0 | Pending | Phone verification is required for internet-enabled kernels and secrets. v0.0 uses CPU kernels only. Secrets: `GH_PAT`, `HF_TOKEN`. |
+| Kaggle | Execution backend #1 (GPU from v0.5) | v0.0 | **Blocked** — account not phone-verified | Phone verification is required for internet-enabled kernels and secrets, so nothing can be dispatched until it is done. v0.0 uses CPU kernels only. Secrets: `GH_PAT`, `HF_TOKEN`. |
 | Modal | Execution backend #2 (CPU data and map jobs) | v0.0 | Pending | Free Starter plan, $30/month credits. Secrets: `axiom-gh`, `axiom-hf`. |
 | GCP + TRC | Stretch TPU track | ≥ v0.6 | Not started | Only if pursuing the 102 M model. Needs billing. Apply about two weeks before the intended scale-up. Gated at G3/G4 per ADR-0004. |
 
@@ -56,7 +69,7 @@ Recorded so a future session does not wonder whether they were forgotten:
 
 | Backend | Identifier | Defined in |
 |---|---|---|
-| Kaggle kernel | `m-de-graaff/axiom-loop-test` | `remote/kaggle/loop_test/kernel-metadata.json` |
+| Kaggle kernel | `markdgraaff/axiom-loop-test` | `remote/kaggle/loop_test/kernel-metadata.json` |
 | Modal app | `axiom-loop` | `remote/modal/loop_test.py` |
 | trackio project | `axiom` | `src/axiom/ops/logx.py` |
 
