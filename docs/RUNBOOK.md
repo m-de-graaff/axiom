@@ -11,6 +11,23 @@ Operational procedures: tokens, dispatch, and what to do when a cloud session di
 | Kaggle API token (`kaggle.json`) | Full account API access | Laptop only, `~/.kaggle/kaggle.json`, chmod 600 | No expiry | Expire from Kaggle account settings, download a fresh one |
 | Modal token | Full workspace access | Laptop only, via `modal token new` | No expiry | `modal token new` reissues; revoke the old one in the Modal dashboard |
 
+### Creating the GitHub PAT
+
+There is no API for this. GitHub removed the Authorizations API in 2020, and fine-grained tokens
+are browser-only, so neither `gh` nor a script can mint one — the steps below are manual by
+necessity, not by preference.
+
+1. Go to Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate.
+2. Name `axiom-kaggle-read`, resource owner `m-de-graaff`, expiry 90 days.
+3. Repository access: **Only select repositories** → `axiom`.
+4. Repository permissions: **Contents: Read-only**. Nothing else. Metadata is added automatically
+   and is fine.
+5. Copy it into the password manager, then into the Kaggle and Modal secret stores. It is shown
+   once.
+
+A token with write access, or with access to all repositories, is a compromise of every repo on
+the account rather than of one drill kernel. The scoping is the point.
+
 ### The rules
 
 **Tokens never appear in code, configs, notebook cell outputs, or git history.** The laptop reads
@@ -42,6 +59,9 @@ just 1.57.0, torch 2.13.0+cpu.
 
 `just check` runs exactly what CI runs, in the same order: `lint`, then `type`, then `test`. If it
 is green locally it is green in CI, unless a Python version in the matrix disagrees.
+
+CI finishes in about a minute on a warm uv cache, well inside the ten-minute budget. Watch a run
+with `gh run watch <id> --exit-status`, or list them with `gh run list`.
 
 The slow drills are marked: `uv run pytest -m slow` runs only the kill-and-resume tests,
 `uv run pytest -m "not slow"` skips them.

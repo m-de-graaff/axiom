@@ -16,7 +16,10 @@ decision after v1.0.
 
 | Repo | Visibility | Created in | Status | Purpose |
 |---|---|---|---|---|
-| `axiom` | Private | v0.0 | Pending | The monorepo. Cloud jobs `pip install` it over a read-only fine-grained PAT. |
+| `axiom` | Private | v0.0 | **Live** (2026-08-20) | The monorepo. Cloud jobs `pip install` it over a read-only fine-grained PAT. |
+
+Default branch `main`, trunk-based, no branch protection (solo repo). CI runs on every push and
+pull request to `main`; first run was green across lint, types, and Python 3.11/3.12/3.13.
 
 **Fallback if GitHub is ever unavailable or unwanted:** `uv build` a wheel and attach it as a
 private Kaggle Dataset instead of installing from git. Documented as plan B per ADR-0008; not
