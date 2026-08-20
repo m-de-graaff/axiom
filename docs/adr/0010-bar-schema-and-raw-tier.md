@@ -51,6 +51,12 @@ Parquet key-value metadata block (`axiom_schema_version`, `source`, `asset_class
 All Binance series are `exchange_tz = "UTC"`, `session_id = "24x7"`. These become real columns in
 v0.2, when session-bound markets arrive and the values start to vary.
 
+> **Superseded by ADR-0014 (v0.2).** They did not become columns. v0.2's session-bound markets do
+> make the values vary between files, but they are still constant *within* every file, so the
+> column would store a per-row copy of something the path already determines. They stay metadata,
+> and the schema stays v1. See ADR-0014 for the full reasoning and for the per-row `session`
+> column the case would actually need.
+
 ### Invariants, enforced at parse time
 
 A **violation** means the file cannot be true, and fails it rather than being repaired:

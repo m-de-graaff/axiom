@@ -76,8 +76,9 @@ verification, pruning, Hub transport — is agnostic to what is inside.
 
 **`BARS_SCHEMA_V1`** (`axiom/schema/bars.py`) is the shape every source is translated into. v0.2
 adds Dukascopy and Stooq by writing a parser that produces this table, not by widening the schema.
-`exchange_tz` and `session_id` are metadata in v0.1 and become real columns in v0.2, when
-session-bound markets make them vary.
+`exchange_tz` and `session_id` stay metadata: v0.2's session-bound markets make them vary between
+files but not within one, so a column would repeat per row what the path already fixes (ADR-0014,
+superseding the v0.1 plan to promote them).
 
 **`schema_version`** appears on both the config and the checkpoint. It is 0 through v0.3 and
 freezes at 1 in v0.4 when the preprocessing contract is locked (ADR-0005). A checkpoint carrying
