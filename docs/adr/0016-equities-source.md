@@ -107,6 +107,23 @@ probes in the adjustment audit stand on the Stooq data alone.
 Its output is `redistribution_class = loader_only_private`: cached privately, never redistributed,
 not even in the form the rest of the corpus is not redistributed in.
 
+### yfinance reachability, measured (2026-08-20)
+
+The expectation above -- that Yahoo would refuse cloud IPs at least some of the time -- was
+tested rather than assumed, and it did not hold. A twenty-ticker smoke from a GitHub Actions
+runner returned **20 of 20 tickers and 2085 events with zero failures**.
+
+That is the opposite of the Dukascopy result on the same backend, and the contrast is the useful
+part: Dukascopy fingerprints callers to an interactive chart endpoint and refuses datacenter
+ranges outright, while Yahoo's action endpoint currently does not. Neither behaviour is a
+promise. Yahoo has no licence and no stability guarantee, so this is recorded as a dated
+observation, not as a property to depend on, and every failure path in the loader stays exactly
+as written.
+
+The consequence for v0.2 is only that the cross-check has both of its inputs available, and that
+the audit will not have to open with an unavailability note. The adjunct remains non-load-bearing:
+if this stops being true tomorrow, the split probes below still stand.
+
 ### The adjustment audit
 
 Whether Stooq is split-adjusted, split-and-dividend-adjusted, or unadjusted decides what v0.3's
