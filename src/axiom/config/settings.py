@@ -33,10 +33,15 @@ class AxiomSettings(BaseSettings):
     hf_token: SecretStr | None = None
     hf_namespace: str = "m-de-graaff"
     runs_repo: str = "axiom-runs"
+    raw_repo: str = "axiom-raw"
 
     @property
     def runs_repo_id(self) -> str:
         return f"{self.hf_namespace}/{self.runs_repo}"
+
+    @property
+    def raw_repo_id(self) -> str:
+        return f"{self.hf_namespace}/{self.raw_repo}"
 
 
 class LoopConfig(BaseModel):
