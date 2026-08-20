@@ -294,13 +294,7 @@ def pull_binance(
         run = run_pull(client, store, tasks, manifest, force=force)
 
     final = run.finish()
-    path_in_repo = f"manifests/pulls/{pull_run_id}.json"
-    if isinstance(store, LocalRawStore):
-        target = Path(dest or ".") / path_in_repo
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(final.to_json(), encoding="utf-8")
-    else:
-        store.upload_json(path_in_repo, final.to_json())
+    _write_run_manifest(store, dest, f"manifests/pulls/{pull_run_id}.json", final)
 
     typer.echo(
         f"{pull_run_id}: ok={final.ok} skipped={final.skipped} failed={final.failed} "
@@ -311,6 +305,100 @@ def pull_binance(
         typer.echo(f"  FAIL {failure.market}/{failure.frequency}/{failure.symbol}: {failure.error}")
     if final.failed:
         raise typer.Exit(1)
+
+
+@pull_app.command("dukascopy")
+def pull_dukascopy(
+    universe: Annotated[
+        str, typer.Option("--universe", help="Universe YAML path, or a packaged config name.")
+    ] = "universe_dukascopy_v1",
+    frequencies: Annotated[str, typer.Option("--frequencies")] = "1h,1d",
+    symbols: Annotated[
+        str | None, typer.Option("--symbols", help="Smoke runs only. Comma-separated.")
+    ] = None,
+    limit: Annotated[
+        int | None, typer.Option("--limit", help="Smoke runs only. Instruments, in file order.")
+    ] = None,
+    as_of: Annotated[
+        str | None,
+        typer.Option("--as-of", help="Pin the run's date, YYYY-MM-DD. Defaults to today, UTC."),
+    ] = None,
+    dest: Annotated[
+        Path | None,
+        typer.Option("--dest", help="Write to this directory instead of the Hub dataset."),
+    ] = None,
+    run_id: Annotated[str | None, typer.Option("--run-id")] = None,
+    backend_tag: Annotated[str, typer.Option("--backend-tag")] = "local",
+    force: Annotated[
+        bool, typer.Option("--force", help="Re-pull even when the sidecar says it is current.")
+    ] = False,
+) -> None:
+    """Pull FX and commodities into `axiom-raw`, re-fetching only what can still change.
+
+    Safe to kill and rerun. A finished instrument is skipped for the rest of the day and
+    re-extended tomorrow, because a year that has ended cannot gain bars and the current one
+    can (ADR-0015). ``--as-of`` pins that judgement for the whole run, so a pull that crosses
+    midnight does not seal a year for half its instruments and not the other half.
+    """
+    from datetime import UTC, date, datetime
+
+    from axiom.provenance.manifest import PullRunManifest
+    from axiom.sources.base import loader_version, run_pull
+    from axiom.sources.dukascopy import DukascopySource
+    from axiom.universe.dukascopy import load_dukascopy_universe
+
+    setup_logging()
+    config = load_dukascopy_universe(universe)
+    wanted_frequencies = _csv(frequencies)
+    symbol_filter = _csv(symbols) if symbols else None
+    pinned = date.fromisoformat(as_of) if as_of else datetime.now(UTC).date()
+
+    source = DukascopySource(config, as_of=pinned)
+    items = source.work_items(wanted_frequencies, symbols=symbol_filter, limit=limit)
+    if not items:
+        typer.echo("work list is empty; check --symbols and the universe", err=True)
+        raise typer.Exit(2)
+
+    pull_run_id = run_id or f"dukascopy-{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
+    manifest = PullRunManifest(
+        pull_run_id=pull_run_id,
+        started_at=datetime.now(UTC).isoformat(),
+        loader_version=loader_version(),
+        backend_tag=backend_tag,
+        universe_hash=config.universe_hash,
+        universe_path=str(universe),
+        markets=sorted({item.market for item in items}),
+        frequencies=wanted_frequencies,
+        limit=limit,
+        symbols_filter=symbol_filter or [],
+    )
+
+    store = _raw_store(dest)
+    run = run_pull(source, store, items, manifest, force=force)
+    final = run.finish()
+
+    _write_run_manifest(store, dest, f"manifests/pulls/{pull_run_id}.json", final)
+    typer.echo(
+        f"{pull_run_id}: ok={final.ok} skipped={final.skipped} failed={final.failed} "
+        f"rows={final.total_rows} bytes={final.total_bytes} as_of={pinned}"
+        + (" (PARTIAL)" if final.is_partial else "")
+    )
+    for failure in final.failures:
+        typer.echo(f"  FAIL {failure.market}/{failure.frequency}/{failure.symbol}: {failure.error}")
+    if final.failed:
+        raise typer.Exit(1)
+
+
+def _write_run_manifest(store, dest: Path | None, path_in_repo: str, final) -> None:
+    """Land the run manifest wherever the artifacts went."""
+    from axiom.raw.store import LocalRawStore
+
+    if isinstance(store, LocalRawStore):
+        target = Path(dest or ".") / path_in_repo
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(final.to_json(), encoding="utf-8")
+    else:
+        store.upload_json(path_in_repo, final.to_json())
 
 
 def _raw_store(dest: Path | None):

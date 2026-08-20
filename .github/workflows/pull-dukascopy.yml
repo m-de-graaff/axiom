@@ -1,0 +1,82 @@
+# The v0.2 Dukascopy pull: FX and commodities, cloud-to-cloud into `axiom-raw`.
+#
+# Separate from `pull.yml` rather than a second job inside it, for one reason: the concurrency
+# group. Two pulls of different sources should be allowed to run at once, and one workflow with
+# one group would serialize them for no benefit.
+#
+# Dispatched by hand, never on push. `gh run cancel` is a real SIGKILL of the runner, which makes
+# the kill-and-resume drill genuine. Resume needs no flag: a finished instrument is skipped for
+# the rest of the as-of day, because a year that has ended cannot gain bars (ADR-0015).
+
+name: pull-dukascopy
+
+on:
+  workflow_dispatch:
+    inputs:
+      universe:
+        description: Universe config — a packaged name or a repo path.
+        default: universe_dukascopy_v1
+      frequencies:
+        description: Comma-separated frequencies.
+        default: 1h,1d
+      symbols:
+        description: Comma-separated symbols, for smoke runs. Empty means all of them.
+        default: ""
+      limit:
+        description: Instruments, in universe order. Empty means all of them.
+        default: ""
+      as_of:
+        description: >-
+          Pin the run's date, YYYY-MM-DD. Empty means today. Pinning it is what keeps a pull that
+          crosses midnight from sealing a year for half its instruments and not the other half.
+        default: ""
+      run_id:
+        description: Pull run id. Empty means one derived from the clock.
+        default: ""
+      dry_run:
+        description: >-
+          Write to the runner's disk instead of the Hub. Verifies the fetch, parse and validate
+          path against the real feed without publishing anything, and leaves nothing behind when
+          the runner is torn down. This is also the reachability smoke: whether Dukascopy answers
+          a GitHub runner's IP at all is a fact about their edge, not about this code.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pull-dukascopy
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # `--extra data` brings the broker client. It is not in the base dependencies because CI
+      # runs every loader through a synthetic fetcher and must not acquire a network dependency.
+      - run: uv sync --frozen --extra data
+
+      - name: Pull Dukascopy into axiom-raw
+        env:
+          AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
+          AXIOM_GIT_COMMIT: ${{ github.sha }}
+          AXIOM_STAGING_DIR: ${{ runner.temp }}/axiom-raw-staging
+          AXIOM_DISABLE_TRACKING: "1"
+        run: |
+          uv run axiom pull dukascopy \
+            --universe '${{ inputs.universe }}' \
+            --frequencies '${{ inputs.frequencies }}' \
+            --backend-tag github \
+            ${{ inputs.symbols && format('--symbols {0}', inputs.symbols) || '' }} \
+            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }} \
+            ${{ inputs.as_of && format('--as-of {0}', inputs.as_of) || '' }} \
+            ${{ inputs.run_id && format('--run-id {0}', inputs.run_id) || '' }} \
+            ${{ inputs.dry_run && format('--dest {0}/raw-dryrun', runner.temp) || '' }}

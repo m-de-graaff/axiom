@@ -104,6 +104,26 @@ pull-kill:
 pull-local symbols="BTCUSDT":
     uv run axiom pull binance --symbols {{symbols}} --markets spot --dest .artifacts/raw-local
 
+# --- the v0.2 Dukascopy pull ---
+
+# Reachability smoke: one instrument against the real feed, written to the runner's disk only.
+dukascopy-smoke symbols="EURUSD":
+    gh workflow run pull-dukascopy.yml -f dry_run=true -f symbols={{symbols}} -f frequencies=1d
+
+# The full pull. Extra flags go through as workflow inputs; see .github/workflows/pull-dukascopy.yml.
+pull-dukascopy *ARGS:
+    gh workflow run pull-dukascopy.yml {{ARGS}}
+
+dukascopy-watch:
+    gh run watch $(gh run list --workflow=pull-dukascopy.yml --limit 1 --json databaseId -q '.[0].databaseId') --exit-status
+
+dukascopy-log:
+    gh run view $(gh run list --workflow=pull-dukascopy.yml --limit 1 --json databaseId -q '.[0].databaseId') --log
+
+# Kill the newest Dukascopy pull mid-flight, for the resume drill.
+dukascopy-kill:
+    gh run cancel $(gh run list --workflow=pull-dukascopy.yml --limit 1 --json databaseId -q '.[0].databaseId')
+
 # Create the private axiom-raw dataset and seed its front page. Idempotent.
 bootstrap-raw:
     gh workflow run bootstrap.yml -f repo=axiom-raw

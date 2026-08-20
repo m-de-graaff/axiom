@@ -20,6 +20,10 @@ dependencies = [
 [project.optional-dependencies]
 train = ["torch>=2.4", "numpy>=1.26"]
 kaggle = ["kaggle>=1.6"]
+# Source clients the cloud pull jobs need. Not installed on the laptop or in CI: the offline
+# tests drive every loader through a synthetic fetcher, so a broker client in CI would buy
+# nothing but a network dependency in a suite that must not have one.
+data = ["dukascopy-python>=4.0.1", "pandas>=2.2"]
 modalrun = ["modal>=0.68"]
 dev = [
     "pytest>=8.0",
