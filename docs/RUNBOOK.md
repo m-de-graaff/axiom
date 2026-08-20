@@ -318,6 +318,73 @@ likely causes, in order: the symbol was delisted between the universe build and 
 bucket published an archive whose checksum does not match, or two source archives disagree about
 a bar at the monthly/daily seam. All three fail loudly and name the symbol.
 
+## The v0.2 pulls
+
+Three sources, three backends, and the differences are not arbitrary — each one is the answer to
+a measured fact about what the vendor will serve.
+
+### Dukascopy (FX and commodities) — Kaggle only
+
+Dukascopy's chart endpoint returns **HTTP 403 to GitHub Actions runner IPs** and answers a Kaggle
+kernel. ADR-0015 records all three hosts. So this is the one pull that does not run on Actions.
+
+**Before the first run, attach the secrets to the kernel.** Kaggle scopes secrets per kernel, so
+`axiom-pull-dukascopy` does not inherit the ones already attached to `axiom-loop-test`; without
+them the kernel dies on `get_secret` with an HTTP 400 that reads like a network error. In the
+Kaggle UI, open the kernel, then **Add-ons → Secrets**, and attach `GH_PAT` and `HF_TOKEN`. This
+is a one-time UI action with no API equivalent.
+
+```sh
+uv run kaggle kernels push -p remote/kaggle/pull_dukascopy
+uv run kaggle kernels status markdgraaff/axiom-pull-dukascopy
+uv run kaggle kernels output markdgraaff/axiom-pull-dukascopy -p .artifacts/kaggle-out
+```
+
+Re-pushing resumes. An instrument whose sidecar already covers today's as-of date is skipped,
+because a year that has ended cannot gain bars. Tomorrow the current year's digest changes and
+the tail is re-extended.
+
+**The kill drill.** Kaggle has no `gh run cancel`, so the fault injection stands in for it: set
+`KILL_AFTER_ITEMS` in `remote/kaggle/pull_dukascopy/run.py` to a number larger than 25 and push.
+The pull calls `os._exit` after that many items — no unwinding, no store flush, no run manifest,
+exactly like a session death. Then clear it and push again; the instruments whose batch was
+committed skip, the ones in the lost batch are re-pulled.
+
+Larger than 25 matters: the store commits in batches of fifty files and each item is two files,
+so a kill before item 25 loses everything and the drill proves nothing.
+
+### Stooq (US daily equities) — a handed-over URL, used immediately
+
+1. Solve the CAPTCHA at <https://stooq.com/db/h/> in the browser.
+2. Copy the direct `static.stooq.com/db/h/<token>/d_us_txt.zip` URL.
+3. Dispatch **straight away**: `just pull-stooq '<url>'`.
+
+**That URL is short-lived.** A token URL that worked in the browser returned 404 from both a
+GitHub runner and the laptop a few minutes later — which is worth knowing precisely, because 404
+means expired-or-single-use while 403 would have meant IP-bound. Only the 403 case needs
+ADR-0016's staging fallback. So do not save the URL for later, and do not treat a 404 as the
+fallback's trigger: re-solve the CAPTCHA and dispatch faster.
+
+If a fresh URL does 403 from the runner, that is the IP-bound case, and then:
+
+```sh
+# On the laptop, and only then. Delete the local copy the moment the upload finishes.
+hf upload m-de-graaff/axiom-raw <local.zip> staging/stooq/d_us_txt.zip --repo-type dataset
+rm <local.zip>            # log this line in the version's QA report
+gh workflow run pull-stooq.yml -f from_staging=staging/stooq/d_us_txt.zip -f archive_url=unused
+```
+
+That sets `staging_exception_used` in the run manifest. Prune `staging/` once the parse succeeds.
+
+### The registry — after every pull
+
+```sh
+just registry-build
+```
+
+Cheap and idempotent: an unchanged tier rebuilds to the same `registry_hash`. Run it after every
+pull, because a registry that lags the tier answers yesterday's question with today's confidence.
+
 ## When a Kaggle session dies
 
 Sessions die on the 12-hour cap, on quota exhaustion, and occasionally for no stated reason. None
