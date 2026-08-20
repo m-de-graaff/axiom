@@ -45,7 +45,18 @@ loop-kaggle-status:
 loop-kaggle-log:
     uv run kaggle kernels output markdgraaff/axiom-loop-test -p .artifacts/kaggle-out
 
-# Dispatch to Modal (CPU, backend #2).
+# Dispatch to GitHub Actions (CPU, backend #2 for v0.0 per ADR-0009).
+loop-github run_id="loop-test-github-001":
+    gh workflow run loop.yml -f run_id={{run_id}}
+
+loop-github-watch:
+    gh run watch $(gh run list --workflow=loop.yml --limit 1 --json databaseId -q '.[0].databaseId') --exit-status
+
+# Kill the newest loop run mid-flight. A real SIGKILL of the runner, for the resume drill.
+loop-github-kill:
+    gh run cancel $(gh run list --workflow=loop.yml --limit 1 --json databaseId -q '.[0].databaseId')
+
+# Dispatch to Modal. Blocked on the account review gate; see ADR-0009.
 loop-modal:
     uv run modal run remote/modal/loop_test.py
 

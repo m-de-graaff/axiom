@@ -1,0 +1,65 @@
+# Execution backend #2 for v0.0: the same `axiom loop run` the laptop and Kaggle call.
+#
+# This is not CI. It never runs on push — it is dispatched by hand, the way a training job is,
+# and it exists to prove the CLI is backend-agnostic. See docs/adr/0009-backend-two.md for why
+# this stands in for Modal.
+#
+# Cancelling a run of this workflow mid-flight is a real SIGKILL of the runner, which makes it a
+# genuine kill-and-resume drill rather than a simulated one.
+
+name: loop
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Run id in axiom-runs. Reuse it to resume, change it to start fresh.
+        default: loop-test-github-001
+      total_steps:
+        description: Steps to run to.
+        default: "2000"
+      save_every:
+        description: Checkpoint interval.
+        default: "200"
+      resume:
+        description: Resume from the newest checkpoint on the Hub.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# Never cancel a loop run automatically. An interrupted run is recoverable, but it should be
+# interrupted on purpose, not because a second dispatch landed.
+concurrency:
+  group: loop-${{ inputs.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  loop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv sync --frozen --extra train
+
+      # Unlike Kaggle, this backend needs no GitHub PAT: it is already inside the repo, so
+      # checkout hands it the code for free. The Hugging Face token is the only secret here.
+      - name: Run the loop
+        env:
+          AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
+          AXIOM_GIT_COMMIT: ${{ github.sha }}
+          AXIOM_DISABLE_TRACKING: "1"
+        run: |
+          uv run axiom loop run \
+            --config loop_test \
+            --backend-tag github \
+            --run-id '${{ inputs.run_id }}' \
+            --total-steps '${{ inputs.total_steps }}' \
+            --save-every '${{ inputs.save_every }}' \
+            ${{ inputs.resume && '--resume' || '' }}
