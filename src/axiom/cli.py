@@ -211,6 +211,71 @@ def universe_show(
     typer.echo(f"universe_hash: {universe.universe_hash}")
 
 
+@universe_app.command("build-equities")
+def universe_build_equities(
+    out: Annotated[Path, typer.Option("--out", help="Where to write the universe YAML.")],
+    top_n: Annotated[int, typer.Option("--top-n", help="Tickers to keep.")] = 3000,
+    min_history_years: Annotated[int, typer.Option("--min-history-years")] = 5,
+    window: Annotated[
+        int, typer.Option("--window", help="Trading days the ranking metric is measured over.")
+    ] = 252,
+    dest: Annotated[
+        Path | None, typer.Option("--dest", help="Build over a local raw tier instead.")
+    ] = None,
+    concurrency: Annotated[int, typer.Option("--concurrency")] = 16,
+) -> None:
+    """Build the equities training universe from the pulled corpus (ADR-0016 criteria).
+
+    Two passes on purpose. The history filter is answered from the registry — eighteen thousand
+    rows of metadata, no downloads — and only the survivors are fetched to compute the ranking
+    metric. Ranking first would pull every artifact in the tier to sort a list that discards
+    most of them.
+
+    The pulled corpus stays a superset of the result. This governs sampling from v0.5 onward,
+    never what is stored.
+    """
+    from datetime import UTC, datetime
+
+    from axiom.registry import REGISTRY_PATH, read_registry
+    from axiom.registry.build import registry_metadata
+    from axiom.universe.equities import build_equity_universe
+
+    setup_logging()
+    store = _raw_store(dest)
+    if dest is not None:
+        data = (Path(dest) / REGISTRY_PATH).read_bytes()
+    else:
+        data = store.get(REGISTRY_PATH)
+    if data is None:
+        typer.echo("no registry found; run `axiom registry build` first", err=True)
+        raise typer.Exit(2)
+
+    registry = read_registry(data)
+    recorded_hash = registry_metadata(registry).get("axiom_registry_hash", "")
+
+    universe = build_equity_universe(
+        store,
+        registry,
+        registry_hash=recorded_hash,
+        generated_at=datetime.now(UTC).date().isoformat(),
+        min_history_years=min_history_years,
+        top_n=top_n,
+        window=window,
+        concurrency=concurrency,
+    )
+    if not universe.symbols:
+        typer.echo("no ticker cleared the criteria; is the equities tier populated?", err=True)
+        raise typer.Exit(2)
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(universe.to_yaml(), encoding="utf-8")
+    typer.echo(
+        f"{len(universe.symbols)} of {universe.candidates_considered} candidates kept; "
+        f"universe_hash={universe.universe_hash}, from registry_hash={recorded_hash or 'unknown'}"
+    )
+    typer.echo(f"wrote {out}")
+
+
 @pull_app.command("binance")
 def pull_binance(
     universe: Annotated[
