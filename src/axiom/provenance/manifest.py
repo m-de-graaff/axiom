@@ -73,6 +73,9 @@ class FileManifest(BaseModel):
     first_ts: int
     last_ts: int
     gap_count: int
+    #: Bars whose open time is not on the frequency grid. Real bars from an exchange restart,
+    #: counted rather than repaired (ADR-0010).
+    off_grid_count: int = 0
 
     # How to read the numbers. `volume` is base asset and `amount` is quote asset for Binance,
     # natively; a source without a native quote volume gets `amount` synthesized and says so.

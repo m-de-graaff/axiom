@@ -53,15 +53,39 @@ v0.2, when session-bound markets arrive and the values start to vary.
 
 ### Invariants, enforced at parse time
 
-Violations fail the file rather than being repaired:
+A **violation** means the file cannot be true, and fails it rather than being repaired:
 
 - `ts` strictly increasing
-- `ts` aligned to the frequency grid — multiples of 3 600 000 ms for `1h`, of 86 400 000 ms for `1d`
 - `high >= max(open, close)`, `low <= min(open, close)`, `high >= low`
 - `volume >= 0`, `amount >= 0`
-- no nulls in OHLCVA
+- no nulls in OHLCVA (a NaN price counts as a null — it is a missing price wearing a number)
 
-Gaps in the grid are **allowed**. They are counted into the manifest and never filled.
+A **warning** means the file is odd but honest, and is counted into the manifest rather than
+argued with:
+
+- `ts` off the frequency grid — not a multiple of 3 600 000 ms for `1h`, of 86 400 000 ms for `1d`
+
+Gaps in the grid are neither. They are **expected**, counted into the manifest, and never filled.
+
+#### Why off-grid is a warning and not a violation
+
+It was a violation for about a day, until the first run against the real bucket failed spot 1h
+BTCUSDT — the single most important series in the corpus — on 43 rows out of 78 829.
+
+`axiom raw inspect` showed what they were. Forty-three consecutive hourly bars starting
+2018-02-09, every one of them offset by the same 28 minutes 14.789 seconds, every one of them
+exactly one hour after the last. That is an exchange restart: Binance came back on a shifted
+phase and stayed there until it realigned. The bars are real. They have trade counts in the ten
+thousands and volumes consistent with their neighbours.
+
+Rejecting them would throw away BTCUSDT over 0.05% of its rows. Snapping them to the grid would
+be imputation, which is the thing the raw tier exists not to do. So they are kept, and
+`off_grid_count` in the manifest says how many there are, which means v0.3's cleaning pass can
+find them and decide — with the whole series in front of it — what a cleaned corpus should do
+about a phase shift.
+
+This is the "raw is faithful" rule doing its job. The first real data disagreed with an
+assumption, and the assumption was the thing that was wrong.
 
 ### Raw is faithful
 

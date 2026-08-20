@@ -151,6 +151,7 @@ class GroupStats:
     bytes: int = 0
     history_days: list[float] = field(default_factory=list)
     gaps: list[int] = field(default_factory=list)
+    off_grid: int = 0
     gappiest: list[tuple[str, int]] = field(default_factory=list)
 
     def summary(self) -> dict[str, object]:
@@ -165,6 +166,7 @@ class GroupStats:
             "history_days_median": round(statistics.median(spans), 1) if spans else 0.0,
             "history_days_max": round(spans[-1], 1) if spans else 0.0,
             "gap_total": sum(self.gaps),
+            "off_grid_total": self.off_grid,
             "gap_median": statistics.median(self.gaps) if self.gaps else 0,
             "series_without_gaps": sum(1 for g in self.gaps if g == 0),
         }
@@ -179,6 +181,7 @@ def corpus_stats(manifests: list[FileManifest]) -> list[GroupStats]:
         group.series += 1
         group.rows += manifest.row_count
         group.gaps.append(manifest.gap_count)
+        group.off_grid += manifest.off_grid_count
         group.gappiest.append((manifest.symbol, manifest.gap_count))
         group.history_days.append((manifest.last_ts - manifest.first_ts) / MS_PER_DAY)
     for group in groups.values():
@@ -225,15 +228,16 @@ def stats_markdown(
         "## Per market and frequency",
         "",
         "| Market | Frequency | Series | Bars | History days (min / median / max) | "
-        "Gaps (total / median) | Series with no gaps |",
-        "|---|---|---:|---:|---|---|---:|",
+        "Gaps (total / median) | Off-grid bars | Series with no gaps |",
+        "|---|---|---:|---:|---|---|---:|---:|",
     ]
     for group in groups:
         s = group.summary()
         lines.append(
             f"| {s['market']} | {s['frequency']} | {s['series']} | {s['rows']:,} | "
             f"{s['history_days_min']} / {s['history_days_median']} / {s['history_days_max']} | "
-            f"{s['gap_total']:,} / {s['gap_median']} | {s['series_without_gaps']} |"
+            f"{s['gap_total']:,} / {s['gap_median']} | {s['off_grid_total']:,} | "
+            f"{s['series_without_gaps']} |"
         )
 
     lines += ["", "## Gappiest series", ""]
@@ -262,6 +266,11 @@ def stats_markdown(
         "Zero by construction: `validate_bars(..., raise_on_error=True)` runs on every series "
         "before it is written, so a file that broke an invariant would not be in the tier to be "
         "counted. This row exists so its absence is deliberate rather than forgotten.",
+        "",
+        "Off-grid bars are counted above rather than rejected. They are real bars published on a "
+        "shifted phase after an exchange restart — 43 consecutive hourly bars on spot BTCUSDT "
+        "from 2018-02-09, each still exactly one hour after the last. Snapping them to the grid "
+        "would be imputation, which the raw tier does not do (ADR-0010).",
     ]
 
     if verify_results:

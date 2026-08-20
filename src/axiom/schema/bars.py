@@ -90,32 +90,51 @@ class Violation:
 
 @dataclass
 class ValidationReport:
-    """What :func:`validate_bars` found. Empty ``violations`` means the table is schema-valid."""
+    """What :func:`validate_bars` found.
+
+    Two buckets, and the difference matters. A **violation** means the file cannot be true — a
+    high below its own open is not something a market did. A **warning** means the file is odd
+    but honest, and the raw tier's job is to carry it forward rather than to argue with it.
+    """
 
     frequency: str
     row_count: int
     violations: dict[str, Violation] = field(default_factory=dict)
+    warnings: dict[str, Violation] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
         return not self.violations
 
     def summary(self) -> str:
-        if self.ok:
-            return f"{self.row_count} rows, {self.frequency}, all invariants hold"
-        broken = "; ".join(f"{name}: {v}" for name, v in sorted(self.violations.items()))
-        return f"{self.row_count} rows, {self.frequency}, violations -- {broken}"
+        parts = []
+        if self.violations:
+            broken = "; ".join(f"{name}: {v}" for name, v in sorted(self.violations.items()))
+            parts.append(f"violations -- {broken}")
+        if self.warnings:
+            noted = "; ".join(f"{name}: {v}" for name, v in sorted(self.warnings.items()))
+            parts.append(f"warnings -- {noted}")
+        tail = ", ".join(parts) if parts else "all invariants hold"
+        return f"{self.row_count} rows, {self.frequency}, {tail}"
 
     def raise_for_status(self, context: str = "bars") -> None:
         if not self.ok:
             raise ValueError(f"{context}: {self.summary()}")
 
 
-def _record(report: ValidationReport, name: str, bad: np.ndarray, row_offset: int = 0) -> None:
+def _record(
+    report: ValidationReport,
+    name: str,
+    bad: np.ndarray,
+    row_offset: int = 0,
+    *,
+    warning: bool = False,
+) -> None:
     """Record a boolean mask of offending rows, if any are set."""
     offenders = np.flatnonzero(bad)
     if offenders.size:
-        report.violations[name] = Violation(int(offenders.size), int(offenders[0]) + row_offset)
+        bucket = report.warnings if warning else report.violations
+        bucket[name] = Violation(int(offenders.size), int(offenders[0]) + row_offset)
 
 
 def validate_bars(
@@ -160,7 +179,13 @@ def validate_bars(
 
     ts = columns["ts"]
     _record(report, "ts_not_increasing", np.diff(ts) <= 0, row_offset=1)
-    _record(report, "ts_off_grid", ts % step != 0)
+    # Off-grid bars are a warning, not a violation. Binance Vision publishes stretches of
+    # phase-shifted bars after an exchange restart -- 43 consecutive hourly bars on spot
+    # BTCUSDT from 2018-02-09, all offset by the same 28m14.789s, each still exactly one hour
+    # after the last. Those are real bars that really traded. Snapping them to the grid would
+    # be imputation, and rejecting them would throw away the most important series in the
+    # corpus over 0.05% of its rows. They are counted into the manifest instead (ADR-0010).
+    _record(report, "ts_off_grid", ts % step != 0, warning=True)
 
     open_, high, low, close = (columns[k] for k in ("open", "high", "low", "close"))
     _record(report, "high_below_open_or_close", high < np.maximum(open_, close))
@@ -172,6 +197,13 @@ def validate_bars(
     if raise_on_error:
         report.raise_for_status()
     return report
+
+
+def count_off_grid(ts: np.ndarray | pa.ChunkedArray, frequency: str) -> int:
+    """Bars whose open time is not a multiple of the frequency step. Recorded, never repaired."""
+    step = grid_step_ms(frequency)
+    values = np.asarray(ts if isinstance(ts, np.ndarray) else ts.to_numpy(zero_copy_only=False))
+    return int(np.count_nonzero(values % step))
 
 
 def count_gaps(ts: np.ndarray | pa.ChunkedArray, frequency: str) -> int:

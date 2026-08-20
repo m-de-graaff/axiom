@@ -20,6 +20,7 @@ from axiom.schema.bars import (
     ROW_GROUP_SIZE,
     bars_metadata,
     count_gaps,
+    count_off_grid,
     grid_step_ms,
     normalize_ts_ms,
     validate_bars,
@@ -84,7 +85,6 @@ def test_golden_fixture_passes_at_every_frequency(frequency):
 #: (column, index, bad value, the violation code it must raise). One row per ADR-0010 invariant.
 MUTATIONS = [
     ("ts", 5, EPOCH, "ts_not_increasing"),  # duplicate of row 0's timestamp, so also out of order
-    ("ts", 5, EPOCH + 5 * 3_600_000 + 1, "ts_off_grid"),
     ("high", 3, 0.0, "high_below_open_or_close"),
     ("low", 3, 1e9, "low_above_open_or_close"),
     ("volume", 4, -1.0, "volume_negative"),
@@ -156,6 +156,36 @@ def test_unsupported_frequency_is_refused():
 
 
 # --- gaps are recorded, never a violation ------------------------------------------------
+
+
+def test_off_grid_bars_are_a_warning_not_a_violation():
+    # Real bars from an exchange restart: still hourly-spaced, on a shifted phase. Rejecting them
+    # would have thrown away BTCUSDT spot 1h over 43 rows out of 78 829.
+    shifted = np.arange(10, dtype=np.int64) * 3_600_000 + EPOCH + 1_694_789
+    table = make_bars(10, ts=shifted)
+    report = validate_bars(table, "1h")
+    assert report.ok
+    assert "ts_off_grid" in report.warnings
+    assert report.warnings["ts_off_grid"].count == 10
+    assert count_off_grid(table["ts"], "1h") == 10
+    assert "warnings" in report.summary()
+
+
+def test_a_warning_does_not_trip_raise_on_error():
+    shifted = np.arange(4, dtype=np.int64) * 3_600_000 + EPOCH + 1_694_789
+    validate_bars(make_bars(4, ts=shifted), "1h", raise_on_error=True)
+
+
+def test_an_on_grid_series_has_no_off_grid_bars():
+    assert count_off_grid(make_bars(10)["ts"], "1h") == 0
+
+
+def test_a_shifted_bar_still_has_to_be_increasing():
+    table = make_bars(10)
+    broken = mutate(table, "ts", 5, EPOCH - 1)
+    report = validate_bars(broken, "1h")
+    assert not report.ok
+    assert "ts_not_increasing" in report.violations
 
 
 def test_gap_passes_validation_and_is_counted():

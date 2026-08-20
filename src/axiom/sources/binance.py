@@ -27,7 +27,13 @@ from axiom.provenance.manifest import (
     sha256_bytes,
 )
 from axiom.raw.store import RawStore
-from axiom.schema.bars import ROW_GROUP_SIZE, bars_metadata, count_gaps, validate_bars
+from axiom.schema.bars import (
+    ROW_GROUP_SIZE,
+    bars_metadata,
+    count_gaps,
+    count_off_grid,
+    validate_bars,
+)
 from axiom.sources.binance_klines import merge, parse_archive
 from axiom.sources.binance_vision import BinanceVision, zip_url
 
@@ -189,6 +195,7 @@ def pull_symbol(
             first_ts=int(ts[0]),
             last_ts=int(ts[-1]),
             gap_count=count_gaps(ts, task.frequency),
+            off_grid_count=count_off_grid(ts, task.frequency),
             universe_hash=universe_hash,
         )
         data = write_parquet(
@@ -206,10 +213,11 @@ def pull_symbol(
 
         store.put(path, data, manifest)
         log.info(
-            "ok %s: %d rows, %d gaps, %d bytes",
+            "ok %s: %d rows, %d gaps, %d off-grid, %d bytes",
             task,
             table.num_rows,
             manifest.gap_count,
+            manifest.off_grid_count,
             len(data),
         )
         return PullResult(task, "ok", manifest=manifest, bytes_written=len(data))

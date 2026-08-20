@@ -133,6 +133,24 @@ def test_the_artifact_hash_matches_the_bytes_on_disk(client, store, tmp_path):
     assert sidecar.artifact_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def test_off_grid_bars_are_pulled_and_counted(bucket, client, store):
+    # An exchange restart leaves a stretch of phase-shifted hourly bars. They are real, so they
+    # land, and the manifest says how many there are.
+    from tests.fakes import csv_bytes, kline_rows, make_zip
+
+    rows = kline_rows(24, start=EPOCH + 1_694_789)
+    bucket.put_month("spot", "SHIFTUSDT", "1h", "2024-01", make_zip(csv_bytes(rows)))
+    result = pull(client, store, symbol="SHIFTUSDT")
+    assert result.status == "ok"
+    assert result.manifest.off_grid_count == 24
+    assert result.manifest.row_count == 24
+
+
+def test_an_on_grid_series_reports_no_off_grid_bars(client, store):
+    pull(client, store)
+    assert store.read_sidecar(artifact_path("spot", "1h", "BTCUSDT")).off_grid_count == 0
+
+
 def test_daily_bars_land_on_the_daily_grid(client, store):
     assert pull(client, store, frequency="1d").status == "ok"
     assert store.read_sidecar(artifact_path("spot", "1d", "BTCUSDT")).row_count == 31
