@@ -14,8 +14,8 @@ raw bars → clean → contract (schema_version=1) → BSQ tokenizer → MDS sha
 | | Component | Delivered in | State |
 |---|---|---|---|
 | C1 | Repo, tooling, config and reproducibility core, dispatch loop | v0.0 | **Built** |
-| C2 | Data acquisition: Binance, Dukascopy, Stooq, yfinance | v0.1–v0.2 | **Partial** — Binance built, the rest is v0.2 |
-| C3 | Storage: Parquet layout, provenance manifests, corpus registry | v0.1–v0.2 | **Partial** — schema, layout and manifests built; the registry is v0.2 |
+| C2 | Data acquisition: Binance, Dukascopy, Stooq, yfinance | v0.1–v0.2 | **Built** — all four loaders, complete for v1.0 scope |
+| C3 | Storage: Parquet layout, provenance manifests, corpus registry | v0.1–v0.2 | **Built** — schema, layout, manifests and registry |
 | C4 | Cleaning: Kronos Algorithm 1, Table 4 thresholds, split/dividend policy | v0.3 | Not started |
 | C5 | Preprocessing contract: candle geometry, causal normalization, golden vectors | v0.4 | Not started |
 | C6 | Tokenizer: BSQ default, flat FSQ ablation, temporal firewall | v0.5 | Not started |
@@ -44,6 +44,40 @@ hard non-goals of this version, not merely things that did not happen.
 **The design rule that makes v0.0 worth doing:** the loop code may not know it is a dummy. What
 v0.5 and v0.7 replace is `_step` and the payload inside `TrainState`. The checkpoint writer, the
 resume path, the config-hash guard, and both dispatch backends are used unchanged.
+
+## What v0.2 built
+
+The rest of C2 and the corpus-wide half of C3. Three things are worth knowing before reading the
+modules.
+
+**One driver, four sources.** `axiom.sources.base` owns everything true of every pull — the skip
+test, validation, the Parquet write, the sidecar, the run manifest, the per-item blast wall — and
+a source supplies four methods: `plan`, `build`, `manifest_extras`, `artifact_path`. Retry and
+connection concurrency deliberately stay in each source's own transport, because they differ in
+kind across an S3 bucket, a broker library with its own retry loop, and a single archive URL.
+
+**The skip test is one list comparison, everywhere.** `is_current` compares the source
+identifiers and digests a source reports now against the ones its sidecar records. Binance has
+vendor checksums; Dukascopy has none, so a calendar year that has *ended* gets a constant token
+and the current year's token carries the run's as-of date; Stooq's whole dump is one archive, so
+every ticker in a run shares its digest. Three very different sources, no second skip mechanism.
+
+**The registry is a cache with no authority.** Sidecars stay the truth. `axiom registry build`
+reduces them to one table so questions are cheap, and rebuilding from an unchanged tier
+reproduces the same `registry_hash`. A sidecar that will not parse is reported, never dropped.
+
+| Module | Does |
+|---|---|
+| `axiom.sources.base` | The `Source` protocol, `WorkItem`, `SourcePlan`, the shared pull driver, letter sharding |
+| `axiom.sources.dukascopy` | FX and commodities, year-chunked, prior years immutable |
+| `axiom.sources.stooq` | The US daily bulk archive: member classification, parse tolerances |
+| `axiom.sources.yahoo_events` | Split and dividend events; its own small loop, because events are not bars |
+| `axiom.registry` | Registry build, its hash, and the canned coverage/storage/gap/staleness reports |
+| `axiom.raw.crosscheck` | Stooq versus Yahoo adjusted closes, for the adjustment audit |
+| `axiom.universe.dukascopy` | The 27 hand-pinned instruments and their measured start dates |
+| `axiom.universe.equities` | The data-driven equities universe: registry filter, then dollar-volume ranking |
+
+Next up is C4, the cleaning pass, in v0.3.
 
 ## What v0.1 built
 

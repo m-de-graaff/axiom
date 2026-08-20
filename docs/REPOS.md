@@ -81,8 +81,8 @@ should do on the account's behalf, whatever the account holder says in the momen
 
 | Service | What it is | Created in | Status | Notes |
 |---|---|---|---|---|
-| Kaggle | Execution backend #1 (GPU from v0.5) | v0.0 | **Live** — phone-verified 2026-08-20 | v0.0 uses CPU kernels only. Secrets `GH_PAT` and `HF_TOKEN` are attached in the editor and are destroyed by every `kernels push`, so dispatch is two steps — see `RUNBOOK.md`. |
-| GitHub Actions | Execution backend #2 for v0.0 (ADR-0009) | v0.0 | **Live** | `.github/workflows/loop.yml`, dispatched by hand, never on push. Reads `AXIOM_HF_TOKEN` from repository secrets. Needs no GitHub PAT: the job is already inside the repo. |
+| Kaggle | Execution backend #1 (GPU from v0.5); **the only backend Dukascopy will answer** (ADR-0015) | v0.0 | **Live** — phone-verified 2026-08-20 | v0.0 uses CPU kernels only. Secrets `GH_PAT` and `HF_TOKEN` are attached in the editor and are destroyed by every `kernels push`, so dispatch is two steps — see `RUNBOOK.md`. |
+| GitHub Actions | Execution backend for the loop and for every pull except Dukascopy (ADR-0009, ADR-0013) | v0.0 | **Live** | `.github/workflows/loop.yml`, dispatched by hand, never on push. Reads `AXIOM_HF_TOKEN` from repository secrets. Needs no GitHub PAT: the job is already inside the repo. |
 | Modal | Execution backend #2 per the roadmap | v0.0 | **Blocked** — account review gate; superseded by ADR-0009 for v0.0 and ADR-0013 for v0.1 | Free Starter plan, $30/month credits. Secrets: `axiom-gh`, `axiom-hf`. `remote/modal/loop_test.py` is written and unrun; it works when the gate clears. No Modal pull job is written until there is a Modal account to run it on. |
 | GCP + TRC | Stretch TPU track | ≥ v0.6 | Not started | Only if pursuing the 102 M model. Needs billing. Apply about two weeks before the intended scale-up. Gated at G3/G4 per ADR-0004. |
 
@@ -116,13 +116,45 @@ loop-test/{run_id}/step_00000200/meta.json
 
 `loop-test/` is a prefix so v0.1 onward can share the repo without colliding with v0.0's drills.
 
+## v0.2 created no new online infrastructure
+
+Worth stating outright, because "the corpus grew from one source to four" sounds like it should
+have. It did not. Every v0.2 artifact lands in the `axiom-raw` dataset v0.1 already created; no
+new repo, no new service, no new account. The table above gains no row.
+
+The one thing v0.2 changed about the estate is *which backend runs which job*, and that was
+forced by measurement rather than chosen — see the execution-backend notes below and ADR-0015.
+
 ## Layout inside `axiom-raw`
 
 ```
-raw/binance/{spot|um}/{1h|1d}/{SYMBOL}.parquet
-raw/binance/{spot|um}/{1h|1d}/{SYMBOL}.parquet.manifest.json
+raw/binance/{spot|um}/{1h|1d}/{SYMBOL}.parquet          # v0.1
+raw/dukascopy/{fx|commodity}/{1h|1d}/{SYMBOL}.parquet   # v0.2
+raw/stooq/us/1d/{A-Z0-9_}/{TICKER}.parquet              # v0.2, letter-sharded
+raw/yahoo/adjustments/{A-Z0-9_}/{TICKER}.parquet        # v0.2, events not bars
+registry/registry.parquet                               # v0.2
+registry/summary.md
+registry/bad_sidecars.json                              # only when something would not parse
+staging/stooq/                                          # transient, see below
 manifests/pulls/{pull_run_id}.json
 ```
 
-One Parquet file per series with its sidecar beside it, and one manifest per pull run. The
-sidecars are the pull's only resume state (ADR-0010).
+Every `.parquet` has a `.parquet.manifest.json` sidecar beside it. The sidecars are the pull's
+only resume state (ADR-0010) and the registry is built over them rather than instead of them.
+
+**Letter sharding** applies to the two sources with thousands of series. The Hub degrades past
+roughly 10 000 files in one folder and the equities tier is 12–18 k series at two files each, so
+the first character of the ticker becomes a directory; anything not alphanumeric goes to `_`
+(ADR-0016). Binance and Dukascopy stay flat — a few hundred files between them is nowhere near
+the limit, and sharding them would churn every existing path to solve a problem they do not have.
+
+**`raw/yahoo/adjustments/` is not bars.** Rows are `(ts, event_type, value)` with
+`event_type ∈ {split, dividend}`, and the sidecars carry `frequency = "events"` precisely so
+nothing downstream tries to index them on a bar grid. Its `redistribution_class` is
+`loader_only_private`, the strictest class in `docs/DATA_LICENSING.md`.
+
+**`staging/` is transient and has a pruning rule.** It exists only for ADR-0016's single
+sanctioned exception: a Stooq archive that had to transit the laptop because its handed-over URL
+was bound to the IP that solved the CAPTCHA. When it is used, the run manifest carries
+`staging_exception_used = true`, and the directory is **pruned as soon as the parse succeeds**.
+A `staging/` that still has contents after a successful pull is a bug, not a cache.
