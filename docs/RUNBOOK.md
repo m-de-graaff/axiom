@@ -96,6 +96,30 @@ The slow drills are marked: `uv run pytest -m slow` runs only the kill-and-resum
 | `just loop-github-kill` | Cancels the newest run mid-flight — a real SIGKILL, for the resume drill |
 | `just loop-modal` | Runs the Modal CPU job. Blocked on the account review gate; see ADR-0009 |
 
+### v0.1 data jobs
+
+| Command | What it does |
+|---|---|
+| `just universe-build 2026-07` | Ranks the bucket in the cloud and writes `universe_v1.yaml` as a workflow artifact |
+| `just universe-fetch` | Downloads that artifact into `src/axiom/configs/` for review and commit |
+| `just universe-show` | Prints a universe's criteria and counts, verifying its hash |
+| `just pull-smoke` | Two majors, spot only, both frequencies. The first thing to run against a fresh `axiom-raw` |
+| `just pull-binance` | Dispatches the full pull. Extra `-f key=value` flags pass through as workflow inputs |
+| `just pull-watch` | Follows the newest pull to completion |
+| `just pull-log` | Downloads the newest pull's log |
+| `just pull-kill` | Cancels the newest pull mid-flight — a real SIGKILL, for the resume drill |
+| `just pull-local` | Pulls into `.artifacts/raw-local`. **Development only** — this writes market data to the machine it runs on, which the laptop must never do |
+
+The narrowing flags are for smoke runs:
+
+```sh
+just pull-binance -f markets=spot -f symbols=BTCUSDT,ETHUSDT
+just pull-binance -f limit=40
+```
+
+Both are recorded in the pull manifest, and a run that used either is marked `(PARTIAL)` in its
+summary line. A partial pull must never be mistaken for a full one.
+
 ### Before the first Kaggle dispatch
 
 **The Kaggle username is `markdgraaff`, not `m-de-graaff`.** GitHub and Hugging Face both use
@@ -210,6 +234,68 @@ Recorded results, 2026-08-20, all at seed 1337:
 
 Both kills were real: Stop Session on Kaggle, `gh run cancel` on Actions. Neither used the
 `AXIOM_KILL_AT_STEP` fault injection, which exists for the local test only.
+
+## Running a pull
+
+A pull is dispatched, watched, and forgotten. It has no checkpoint, so there is nothing to clean
+up if it dies and nothing to configure if it is restarted.
+
+```sh
+just pull-binance                 # the whole universe, both markets, 1h and 1d
+just pull-watch                   # follow it
+```
+
+The job downloads roughly a gigabyte of small archives across some six hundred series and takes
+on the order of an hour. It writes into `axiom-raw` in batched commits of about fifty files, so
+progress is visible in the dataset's commit history while the run is still going.
+
+### Reading a pull manifest
+
+Every run writes `manifests/pulls/{pull_run_id}.json` into `axiom-raw`. The fields worth looking
+at first:
+
+| Field | Means |
+|---|---|
+| `ok` / `skipped` / `failed` | Series written, already current, and not landed |
+| `limit`, `symbols_filter` | Non-empty means this was a partial pull |
+| `failures[]` | One entry per failed series, with the exception that stopped it |
+| `total_rows`, `total_bytes` | What this run added, not what the corpus holds |
+| `universe_hash` | Which universe definition asked for this work |
+
+`skipped` is the number that says resume worked. On a second run of the same work list with
+nothing new upstream, every series should be skipped and `ok` should be zero.
+
+A `failed` entry is not automatically a bug. A symbol in the universe that has since been
+delisted, or one whose archives have a gap the bucket never filled, fails honestly and is
+recorded. What matters at the exit gate is that every failure has an explanation.
+
+### The kill-and-resume drill for pulls
+
+Same shape as the loop drill, and simpler, because there is no state to compare — the evidence is
+in the skip count.
+
+```sh
+just pull-binance -f limit=40     # start a partial pull
+just pull-kill                    # once the log shows a dozen symbols done
+just pull-binance -f limit=40     # relaunch, unchanged
+```
+
+The relaunch must report a non-zero `skipped` matching roughly what the first run finished, and
+must finish the rest. No flag is passed to make this happen: resuming is what the pull does on
+every start. `gh run cancel` SIGKILLs the runner, so this is a real interruption.
+
+The one thing to check in the second run's log is that skipped symbols cost no archive
+downloads — a skip is a listing plus a handful of tiny `.CHECKSUM` fetches, nothing more.
+
+### When a pull fails partway
+
+Dispatch it again. That is the whole procedure. The finished series skip, the unfinished ones are
+retried, and the second run's manifest records the split.
+
+If the same symbol fails twice with the same error, that is a real failure worth reading. The
+likely causes, in order: the symbol was delisted between the universe build and the pull, the
+bucket published an archive whose checksum does not match, or two source archives disagree about
+a bar at the monthly/daily seam. All three fail loudly and name the symbol.
 
 ## When a Kaggle session dies
 

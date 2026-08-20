@@ -44,9 +44,27 @@ implemented.
 |---|---|---|---|---|---|
 | `axiom-runs` | dataset | Private | v0.0 | **Live** (2026-08-20) | Checkpoints, run manifests, `latest.json` resume pointers |
 | `axiom-trackio` | space | Private | v0.0 (optional) | Pending | trackio dashboard sync. trackio may auto-create a backing dataset; if it does, add it to this table. |
-| `axiom-raw` | dataset | Private | v0.1 | Planned | Cleaned-source Parquet plus provenance manifests |
+| `axiom-raw` | dataset | Private | v0.1 | **Blocked** — see below | Cleaned-source Parquet plus provenance manifests |
 | `axiom-tokenized` | dataset | Private → public at Publish Gate | v0.6 | Planned | Pre-tokenized MDS shards |
 | `axiom-model` | model | Private → public at Publish Gate | v0.9 | Planned | `model.safetensors`, `config.json`, model card |
+
+### `axiom-raw` is blocked on a token permission
+
+`create_repo` returns `403 Forbidden: You don't have the rights to create a dataset under the
+namespace "m-de-graaff"`. The `axiom-write` fine-grained token has write access to the `axiom-*`
+repos that already exist, and no permission to create new ones under the namespace.
+
+Two ways out, either is fine:
+
+1. Add **Create repos** to the `axiom-write` token at
+   <https://huggingface.co/settings/tokens>, then run
+   `uv run python -c "from axiom.config.settings import AxiomSettings; from huggingface_hub import HfApi; s=AxiomSettings(); HfApi(token=s.hf_token.get_secret_value()).create_repo(s.raw_repo_id, repo_type='dataset', private=True)"`.
+2. Create the dataset by hand at <https://huggingface.co/new-dataset> — name `axiom-raw`, owner
+   `m-de-graaff`, **Private** — and confirm the token's repo scope covers it.
+
+Either way, seed its front page afterwards from `remote/hf/axiom-raw-README.md`, which is the
+versioned source of truth for it. Nothing else in v0.1 needs the token widened: the pull writes
+to the dataset once it exists.
 
 ## Execution backends
 
@@ -54,7 +72,7 @@ implemented.
 |---|---|---|---|---|
 | Kaggle | Execution backend #1 (GPU from v0.5) | v0.0 | **Live** — phone-verified 2026-08-20 | v0.0 uses CPU kernels only. Secrets `GH_PAT` and `HF_TOKEN` are attached in the editor and are destroyed by every `kernels push`, so dispatch is two steps — see `RUNBOOK.md`. |
 | GitHub Actions | Execution backend #2 for v0.0 (ADR-0009) | v0.0 | **Live** | `.github/workflows/loop.yml`, dispatched by hand, never on push. Reads `AXIOM_HF_TOKEN` from repository secrets. Needs no GitHub PAT: the job is already inside the repo. |
-| Modal | Execution backend #2 per the roadmap | v0.0 | **Blocked** — account review gate; superseded for v0.0 by ADR-0009 | Free Starter plan, $30/month credits. Secrets: `axiom-gh`, `axiom-hf`. `remote/modal/loop_test.py` is written and unrun; it works when the gate clears. |
+| Modal | Execution backend #2 per the roadmap | v0.0 | **Blocked** — account review gate; superseded by ADR-0009 for v0.0 and ADR-0013 for v0.1 | Free Starter plan, $30/month credits. Secrets: `axiom-gh`, `axiom-hf`. `remote/modal/loop_test.py` is written and unrun; it works when the gate clears. No Modal pull job is written until there is a Modal account to run it on. |
 | GCP + TRC | Stretch TPU track | ≥ v0.6 | Not started | Only if pursuing the 102 M model. Needs billing. Apply about two weeks before the intended scale-up. Gated at G3/G4 per ADR-0004. |
 
 ## Deliberately not created
@@ -72,6 +90,8 @@ Recorded so a future session does not wonder whether they were forgotten:
 |---|---|---|
 | Kaggle kernel | `markdgraaff/axiom-loop-test` | `remote/kaggle/loop_test/kernel-metadata.json` |
 | GitHub Actions workflow | `loop.yml` | `.github/workflows/loop.yml` |
+| GitHub Actions workflow | `universe.yml` | `.github/workflows/universe.yml` |
+| GitHub Actions workflow | `pull.yml` | `.github/workflows/pull.yml` |
 | Modal app | `axiom-loop` | `remote/modal/loop_test.py` |
 | trackio project | `axiom` | `src/axiom/ops/logx.py` |
 
@@ -84,3 +104,14 @@ loop-test/{run_id}/step_00000200/meta.json
 ```
 
 `loop-test/` is a prefix so v0.1 onward can share the repo without colliding with v0.0's drills.
+
+## Layout inside `axiom-raw`
+
+```
+raw/binance/{spot|um}/{1h|1d}/{SYMBOL}.parquet
+raw/binance/{spot|um}/{1h|1d}/{SYMBOL}.parquet.manifest.json
+manifests/pulls/{pull_run_id}.json
+```
+
+One Parquet file per series with its sidecar beside it, and one manifest per pull run. The
+sidecars are the pull's only resume state (ADR-0010).
