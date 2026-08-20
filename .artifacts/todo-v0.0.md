@@ -59,7 +59,7 @@ Create `docs/adr/` with one short file each (context → decision → consequenc
 - [ ] `uv sync --all-extras` succeeds; `uv lock` committed.
 
 ### B3. Directory scaffold (empty `__init__.py` where needed)
-- [ ] 
+- [ ]
 ```
 src/axiom/
   cli.py                # typer app: version, config, loop subcommands
