@@ -14,9 +14,11 @@ from axiom.universe.binance import (
     UniverseCriteria,
     build_universe,
     candidate_symbols,
+    has_min_history,
     is_leveraged,
     load_universe,
     rank_symbols,
+    shift_month,
 )
 from tests.fakes import DAY_MS, FakeBucket, kline_zip
 
@@ -45,8 +47,10 @@ def client_factory():
         client.close()
 
 
-def seed(bucket: FakeBucket, market: str, volumes: dict[str, float]) -> None:
-    """Give each symbol a month of 1d bars whose quote volume ranks it as intended."""
+def seed(
+    bucket: FakeBucket, market: str, volumes: dict[str, float], *, history_months: int = 24
+) -> None:
+    """Give each symbol enough 1h history to qualify, plus a rankable month of 1d bars."""
     for symbol, volume in volumes.items():
         bucket.put_month(
             market,
@@ -55,6 +59,7 @@ def seed(bucket: FakeBucket, market: str, volumes: dict[str, float]) -> None:
             MONTH,
             kline_zip(30, step=DAY_MS, price=1.0, volume=volume),
         )
+        bucket.put_month(market, symbol, "1h", shift_month(MONTH, -history_months), kline_zip(24))
 
 
 # --- exclusions --------------------------------------------------------------------------
@@ -101,6 +106,43 @@ def test_non_usdt_quotes_are_excluded():
 
 def test_the_quote_asset_alone_is_not_a_candidate():
     assert candidate_symbols(["USDT", "BTCUSDT"]) == ["BTCUSDT"]
+
+
+# --- minimum history ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("month", "delta", "expected"),
+    [("2026-07", -12, "2025-07"), ("2026-01", -1, "2025-12"), ("2025-12", 1, "2026-01")],
+)
+def test_month_arithmetic(month, delta, expected):
+    assert shift_month(month, delta) == expected
+
+
+def test_a_symbol_younger_than_the_rule_is_rejected(client_factory):
+    bucket = FakeBucket()
+    seed(bucket, "um", {"OLDUSDT": 1.0}, history_months=24)
+    seed(bucket, "um", {"NVDAUSDT": 9.0}, history_months=2)
+    client = client_factory(bucket)
+    assert has_min_history(client, "um", "OLDUSDT", month=MONTH, min_months=12)
+    assert not has_min_history(client, "um", "NVDAUSDT", month=MONTH, min_months=12)
+
+
+def test_a_symbol_with_no_1h_series_is_rejected(client_factory):
+    bucket = FakeBucket()
+    seed(bucket, "spot", {"BTCUSDT": 1.0})
+    client = client_factory(bucket)
+    assert not has_min_history(client, "spot", "GHOSTUSDT", month=MONTH, min_months=12)
+
+
+def test_a_high_volume_newcomer_does_not_enter_the_universe(client_factory):
+    # The July 2026 build put seven tokenized equities in the top ten perpetuals by volume. They
+    # trade real size; they are also weeks old, and they are not crypto.
+    bucket = FakeBucket()
+    seed(bucket, "um", {"BTCUSDT": 1.0}, history_months=24)
+    seed(bucket, "um", {"NVDAUSDT": 1000.0}, history_months=2)
+    universe = build(bucket, client_factory, top_n={"um": 10})
+    assert universe.symbols["um"] == ["BTCUSDT"]
 
 
 # --- ranking -----------------------------------------------------------------------------
@@ -173,7 +215,7 @@ def test_the_criteria_are_echoed_into_the_file(client_factory):
     universe = build(bucket, client_factory)
     payload = yaml.safe_load(universe.to_yaml())
     assert payload["criteria"]["selection_month"] == MONTH
-    assert payload["criteria"]["min_history_days"] == 365
+    assert payload["criteria"]["min_history_months"] == 12
     assert "USDC" in payload["criteria"]["excluded_bases"]
     assert payload["universe_hash"] == universe.universe_hash
 

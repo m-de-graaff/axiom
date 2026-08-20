@@ -14,8 +14,8 @@ raw bars → clean → contract (schema_version=1) → BSQ tokenizer → MDS sha
 | | Component | Delivered in | State |
 |---|---|---|---|
 | C1 | Repo, tooling, config and reproducibility core, dispatch loop | v0.0 | **Built** |
-| C2 | Data acquisition: Binance, Dukascopy, Stooq, yfinance | v0.1–v0.2 | Not started |
-| C3 | Storage: Parquet layout, provenance manifests, corpus registry | v0.1–v0.2 | Not started |
+| C2 | Data acquisition: Binance, Dukascopy, Stooq, yfinance | v0.1–v0.2 | **Partial** — Binance built, the rest is v0.2 |
+| C3 | Storage: Parquet layout, provenance manifests, corpus registry | v0.1–v0.2 | **Partial** — schema, layout and manifests built; the registry is v0.2 |
 | C4 | Cleaning: Kronos Algorithm 1, Table 4 thresholds, split/dividend policy | v0.3 | Not started |
 | C5 | Preprocessing contract: candle geometry, causal normalization, golden vectors | v0.4 | Not started |
 | C6 | Tokenizer: BSQ default, flat FSQ ablation, temporal firewall | v0.5 | Not started |
@@ -45,6 +45,27 @@ hard non-goals of this version, not merely things that did not happen.
 v0.5 and v0.7 replace is `_step` and the payload inside `TrainState`. The checkpoint writer, the
 resume path, the config-hash guard, and both dispatch backends are used unchanged.
 
+## What v0.1 built
+
+The Binance half of C2, and the per-file half of C3. The corpus registry — one queryable index
+over everything in `axiom-raw` — is v0.2, because a registry over one source is a list.
+
+| Module | Does |
+|---|---|
+| `axiom.schema.bars` | Bar schema v1, its invariants, timestamp-unit detection, gap counting |
+| `axiom.provenance.manifest` | Sidecar and pull-run manifests, canonical serialization, the idempotence test |
+| `axiom.raw.store` | Where artifacts land: a local directory or the private `axiom-raw` dataset |
+| `axiom.sources.binance_vision` | URLs, S3 enumeration, retrying downloads, checksum verification |
+| `axiom.sources.binance_klines` | Zip to bar table: header sniffing, unit detection, seam resolution |
+| `axiom.sources.binance` | `pull_symbol`, the work list, and the run manifest |
+| `axiom.universe.binance` | The pinned universe: exclusions, ranking, and its hash |
+
+**The design rule that makes v0.1 worth doing:** the pull has no checkpoint. `pull_symbol` is a
+function of the universe, what the bucket publishes, and what the raw tier already holds, so a
+killed run resumes by asking the same three questions again. There is no cursor to corrupt and
+no progress file to go stale — the same discipline as v0.0's `latest.json`, arrived at from the
+other direction.
+
 ## The three seams that later versions plug into
 
 **`TrainState`** (`axiom/ops/checkpoint.py`) is the unit of resumability. v0.0 stores a scalar
@@ -52,6 +73,11 @@ where v0.7 stores model and optimizer tensors. Everything around it — atomic w
 verification, pruning, Hub transport — is agnostic to what is inside.
 
 **`_step`** (`axiom/loop/dummy_trainer.py`) is the only function that knows what training means.
+
+**`BARS_SCHEMA_V1`** (`axiom/schema/bars.py`) is the shape every source is translated into. v0.2
+adds Dukascopy and Stooq by writing a parser that produces this table, not by widening the schema.
+`exchange_tz` and `session_id` are metadata in v0.1 and become real columns in v0.2, when
+session-bound markets make them vary.
 
 **`schema_version`** appears on both the config and the checkpoint. It is 0 through v0.3 and
 freezes at 1 in v0.4 when the preprocessing contract is locked (ADR-0005). A checkpoint carrying
@@ -69,6 +95,12 @@ These are cheap now and expensive to retrofit:
   one, never a half file.
 - **Tracking failures never take the run down.** A 12-hour session lost to an unreachable metrics
   endpoint is 12 hours of quota gone.
+- **Source archives are checksum-verified before extraction.** Corrupt bytes never reach a parser,
+  and a second corrupt download fails the file loudly rather than caching it.
+- **Bar invariants are enforced at parse time.** A file that breaks one is refused, so nothing
+  downstream has to defend against a high below its own open.
+- **A monthly/daily overlap must agree.** Two source files that disagree about the same bar fail
+  the series rather than being silently reconciled.
 
 ## Where the honest numbers come from
 

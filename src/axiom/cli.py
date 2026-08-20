@@ -201,7 +201,7 @@ def universe_show(
 
     universe = load_universe(path)
     typer.echo(f"selection_month: {universe.criteria.selection_month}")
-    typer.echo(f"min_history_days: {universe.criteria.min_history_days}")
+    typer.echo(f"min_history_months: {universe.criteria.min_history_months}")
     for name, symbols in sorted(universe.symbols.items()):
         typer.echo(f"{name}: {len(symbols)} symbols, first 5 {symbols[:5]}")
     typer.echo(f"universe_hash: {universe.universe_hash}")

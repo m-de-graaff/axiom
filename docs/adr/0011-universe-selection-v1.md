@@ -54,14 +54,30 @@ print is real price action.
 ### Counts
 
 `spot`: top 200. `um`: top 100. Both are headroom over the ≥ 100 exit gate, which is measured
-after the pull on pairs that clear the history rule at *both* 1h and 1d.
+after the pull on pairs present at *both* 1h and 1d.
 
 ### Minimum history
 
-A pair counts toward the exit gate when its 1h series spans **at least 12 months** —
-`last_ts - first_ts >= 365 days`. This is checked against the pulled manifests, not at selection
-time, because the S3 listing tells you a file exists and not how many rows are in it. Short-history
-symbols are still pulled; they are simply not counted.
+A symbol qualifies only when its 1h series starts **at least 12 months** before the selection
+month. This is applied **at selection time**, from the listing: the earliest monthly archive is
+the start of the series, so the listing answers the question without downloading anything.
+
+The first build of this universe made the case for the rule better than any argument would have.
+Ranked on July 2026 volume alone, seven of the top ten USDT-M perpetuals were tokenized equities
+and metals — `NVDAUSDT`, `TSLAUSDT`, `SOXLUSDT`, `XAUUSDT`, `SKHYNIXUSDT` — which Binance has
+begun listing under the same quote asset as crypto. They trade real volume. They are also weeks
+old, and they are not crypto, so admitting them would have mislabelled a third of the perpetual
+corpus under `asset_class=crypto` and handed the v0.7 conditioning embedding a lie. The same
+build put `USD1USDT` and `RLUSDUSDT`, two stablecoins launched recently, at ranks four and nine.
+
+A history rule removes all of it without anybody maintaining a list of which tickers are secretly
+stocks — and it removes the next batch too, whatever those turn out to be. Applying it before the
+pull rather than after is also cheaper: it is one listing request per candidate instead of a
+full multi-year download for a series that will not be counted.
+
+Gold-backed tokens with long histories (`PAXGUSDT`, `XAUTUSDT`) survive and are kept. They are
+commodity exposure traded as crypto on a crypto venue, which is what the label says, and their
+price history is real.
 
 ### Identity
 

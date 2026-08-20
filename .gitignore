@@ -18,6 +18,8 @@ runs/
 *.pt
 
 .artifacts/kaggle-out/
+.artifacts/raw-local/
+.artifacts/*.log
 
 # Build / tool caches
 dist/
