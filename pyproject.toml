@@ -1,6 +1,6 @@
 [project]
 name = "axiom"
-version = "0.0.0"
+version = "0.1.0"
 description = "K-line foundation model: discretize-then-autoregress over OHLCV bars."
 readme = "README.md"
 authors = [{ name = "m-de-graaff", email = "mark_degraaff@outlook.com" }]

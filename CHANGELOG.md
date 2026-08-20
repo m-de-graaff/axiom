@@ -80,6 +80,12 @@ Zero Kaggle GPU-hours. Zero Modal spend — Modal still has no account (ADR-0013
   dominant in 2021 and is quiet now can miss the cut despite years of good history (ADR-0011).
 - **No corpus registry.** Answering "what do we have" means reading 600 sidecars. That is fine at
   this size and is what v0.2 replaces.
+- **The v0.1 manifests record `loader_version` `0.0.0+<commit>`.** The package version was bumped
+  to `0.1.0` after the pull ran, so every sidecar written during v0.1 names the version that
+  actually produced it, which was still `0.0.0`. Harmless by design — `loader_version` is outside
+  the manifest identity hash precisely so that the build that wrote a file cannot change what the
+  file is — and left as it stands rather than rewritten, because a manifest that claims a version
+  it was not written by is worse than one that is merely surprising.
 
 ## [0.0.0] - 2026-08-20
 
