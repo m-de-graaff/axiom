@@ -21,11 +21,11 @@ REPO = "m-de-graaff/axiom"
 BRANCH = "main"
 
 # Larger than the local drill so a mid-run cancel from the Kaggle UI lands somewhere useful.
-TOTAL_STEPS = 2000
-SAVE_EVERY = 200
+TOTAL_STEPS = 6000
+SAVE_EVERY = 500
 
 # A stable run id is what makes a re-push resume rather than start over.
-RUN_ID = "loop-test-kaggle-001"
+RUN_ID = "loop-test-kaggle-kill"
 
 
 def read_secrets() -> tuple[str, str]:

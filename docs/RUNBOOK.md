@@ -88,10 +88,13 @@ The slow drills are marked: `uv run pytest -m slow` runs only the kill-and-resum
 | `just loop-local` | Runs the loop on the laptop with no network at all |
 | `just loop-verify` | The determinism drill: clean run vs killed-and-resumed run, compared exactly. Exits non-zero on any drift |
 | `just loop-hub` | Runs locally but pushes to `axiom-runs`, so there is a checkpoint tree to inspect |
-| `just loop-kaggle` | Pushes and starts the Kaggle CPU kernel |
+| `just loop-kaggle` | Uploads the kernel code. **Does not run it with secrets** — see the two-step note below |
 | `just loop-kaggle-status` | Polls the kernel's state |
 | `just loop-kaggle-log` | Downloads the kernel's output log |
-| `just loop-modal` | Runs the Modal CPU job |
+| `just loop-github` | Dispatches backend #2 on GitHub Actions. One command, no follow-up |
+| `just loop-github-watch` | Follows the newest Actions loop run to completion |
+| `just loop-github-kill` | Cancels the newest run mid-flight — a real SIGKILL, for the resume drill |
+| `just loop-modal` | Runs the Modal CPU job. Blocked on the account review gate; see ADR-0009 |
 
 ### Before the first Kaggle dispatch
 
@@ -116,6 +119,29 @@ ConnectionError: Connection error trying to communicate with service.
 ```
 
 The `ConnectionError` is misleading — the network is fine, the secret is simply not attached.
+
+### `kaggle kernels push` destroys the secret attachment
+
+Verified three times on 2026-08-20. Push the kernel, and the secrets that were attached to it are
+gone; the next run dies at `get_secret` with the error above. The Kaggle API has no field for
+secrets — `kernel-metadata.json` carries `enable_gpu`, `enable_internet`, `dataset_sources` and
+friends, and nothing else — so there is no way to declare them and no way to re-attach them from
+the CLI.
+
+**Kaggle dispatch is therefore two steps, and the order matters:**
+
+1. `just loop-kaggle` uploads the code. This wipes the secrets.
+2. In the editor, re-attach `GH_PAT` and `HF_TOKEN`, then click **Save Version**. That runs it.
+
+Once the code is uploaded, further runs of the same code need no push: **Save Version** alone
+re-runs and resumes, and the attachment survives because nothing overwrote it. Only a code change
+costs you the re-attach.
+
+This is why `just loop-kaggle` is not sufficient on its own, and why the v0.0 plan's Phase F5 —
+which assumed a push was the whole dispatch — was wrong on this point.
+
+Backend #2 has no such problem: GitHub Actions reads `AXIOM_HF_TOKEN` from repository secrets,
+which nothing resets. See ADR-0009.
 
 The kernel prints its Python and torch versions on startup. **Record them in this file and amend
 ADR-0007 if Kaggle's Python is below the 3.11 floor.**
@@ -145,19 +171,35 @@ This is the loop v0.0 exists to prove, and it is the procedure every later versi
 **Locally**, `just loop-verify` does the whole drill in one command and exits non-zero on drift.
 The same drill runs in CI as `tests/test_loop_determinism.py`.
 
-**On Kaggle:**
+**On GitHub Actions**, the whole drill is scriptable from the laptop:
 
-1. `just loop-kaggle` and wait until the log shows the run past step 600.
-2. Cancel the kernel from the Kaggle UI. This is a real SIGKILL, not fault injection.
-3. `just loop-kaggle` again. The log must show `resumed loop-test-kaggle-001 from step N`, where
-   N is the last multiple of `save_every` before the cancel.
-4. Let it finish. The final `acc` must equal a local run of the same config:
-   `uv run axiom loop run --config loop_test --run-id x --total-steps 2000 --save-every 200 --no-push`
-5. Confirm on Hugging Face that `loop-test/loop-test-kaggle-001/latest.json` and the step
-   directories exist in `axiom-runs`.
+```sh
+gh workflow run loop.yml -f run_id=drill -f total_steps=6000 -f save_every=500 -f resume=false
+just loop-github-kill                     # once it is past a checkpoint
+just loop-github run_id=drill             # resume=true is the default
+```
+
+Recorded result, 2026-08-20: killed at step 2000 of 6000, resumed, finished at
+`acc=3018.7626345157623` — identical to an uninterrupted local run of the same config.
+
+**On Kaggle**, every step is a UI action, because a push would wipe the secrets:
+
+1. Re-attach `GH_PAT` and `HF_TOKEN` in the editor.
+2. **Save Version.** Wait until the run is past a checkpoint.
+3. Cancel it from the Kaggle UI. This is a real SIGKILL, not fault injection.
+4. **Save Version** again — no push in between, or the secrets go and the resume dies at
+   `get_secret`. The log must show `resumed <run_id> from step N`, where N is the last multiple
+   of `save_every` before the cancel.
+5. The final `acc` must equal a local run of the same config:
+   `uv run axiom loop run --config loop_test --run-id x --total-steps 6000 --save-every 500 --no-push`
+6. Confirm the step directories and `latest.json` are in `axiom-runs`.
 
 Nothing on Kaggle's side other than the log matters. The kernel's filesystem is disposable by
 design; the checkpoint on the Hub is the only durable state.
+
+Recorded result, 2026-08-20: a full uninterrupted Kaggle run reached
+`acc=996.4922949671745` at step 2000, matching the laptop exactly. The kill-and-resume half of
+the Kaggle drill is still outstanding.
 
 ## When a Kaggle session dies
 

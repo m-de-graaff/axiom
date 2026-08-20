@@ -52,8 +52,9 @@ implemented.
 
 | Service | What it is | Created in | Status | Notes |
 |---|---|---|---|---|
-| Kaggle | Execution backend #1 (GPU from v0.5) | v0.0 | **Blocked** — account not phone-verified | Phone verification is required for internet-enabled kernels and secrets, so nothing can be dispatched until it is done. v0.0 uses CPU kernels only. Secrets: `GH_PAT`, `HF_TOKEN`. |
-| Modal | Execution backend #2 (CPU data and map jobs) | v0.0 | Pending | Free Starter plan, $30/month credits. Secrets: `axiom-gh`, `axiom-hf`. |
+| Kaggle | Execution backend #1 (GPU from v0.5) | v0.0 | **Live** — phone-verified 2026-08-20 | v0.0 uses CPU kernels only. Secrets `GH_PAT` and `HF_TOKEN` are attached in the editor and are destroyed by every `kernels push`, so dispatch is two steps — see `RUNBOOK.md`. |
+| GitHub Actions | Execution backend #2 for v0.0 (ADR-0009) | v0.0 | **Live** | `.github/workflows/loop.yml`, dispatched by hand, never on push. Reads `AXIOM_HF_TOKEN` from repository secrets. Needs no GitHub PAT: the job is already inside the repo. |
+| Modal | Execution backend #2 per the roadmap | v0.0 | **Blocked** — account review gate; superseded for v0.0 by ADR-0009 | Free Starter plan, $30/month credits. Secrets: `axiom-gh`, `axiom-hf`. `remote/modal/loop_test.py` is written and unrun; it works when the gate clears. |
 | GCP + TRC | Stretch TPU track | ≥ v0.6 | Not started | Only if pursuing the 102 M model. Needs billing. Apply about two weeks before the intended scale-up. Gated at G3/G4 per ADR-0004. |
 
 ## Deliberately not created
@@ -70,6 +71,7 @@ Recorded so a future session does not wonder whether they were forgotten:
 | Backend | Identifier | Defined in |
 |---|---|---|
 | Kaggle kernel | `markdgraaff/axiom-loop-test` | `remote/kaggle/loop_test/kernel-metadata.json` |
+| GitHub Actions workflow | `loop.yml` | `.github/workflows/loop.yml` |
 | Modal app | `axiom-loop` | `remote/modal/loop_test.py` |
 | trackio project | `axiom` | `src/axiom/ops/logx.py` |
 
