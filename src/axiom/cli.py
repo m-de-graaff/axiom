@@ -771,6 +771,69 @@ def pull_yahoo_events(
         typer.echo(blocked_report(run, as_of=stamp))
 
 
+@raw_app.command("audit-adjustments")
+def raw_audit_adjustments(
+    out: Annotated[Path, typer.Option("--out", help="Where to write the audit report.")] = Path(
+        "docs/reports/v0.2-adjustment-audit.md"
+    ),
+    sample: Annotated[int, typer.Option("--sample", help="Tickers for the cross-check half.")] = 25,
+    years: Annotated[int, typer.Option("--years")] = 2,
+    seed: Annotated[int, typer.Option("--seed")] = 1337,
+    skip_crosscheck: Annotated[
+        bool,
+        typer.Option("--skip-crosscheck", help="Split probes only; claim nothing about dividends."),
+    ] = False,
+    dest: Annotated[Path | None, typer.Option("--dest", help="Read a local tier instead.")] = None,
+) -> None:
+    """Measure what Stooq already did to these prices, and write the verdict down.
+
+    Two halves of deliberately different fragility. The split probes need the stored bars and a
+    calendar, so they answer even when Yahoo is unavailable. The dividend classification needs
+    the cross-check, and is reported as unestablished rather than guessed when it cannot run —
+    a corpus can know it is split-adjusted while staying honestly unsure about dividends.
+    """
+    from datetime import UTC, datetime
+
+    from axiom.raw.adjustments import audit_markdown, classify, run_split_probes
+    from axiom.raw.crosscheck import crosscheck_equities, crosscheck_markdown
+
+    setup_logging()
+    store = _raw_store(dest)
+    manifests = store.list_manifests()
+    if not any(m.source == "stooq" for m in manifests):
+        typer.echo("no Stooq series in the raw tier; nothing to audit", err=True)
+        raise typer.Exit(2)
+
+    as_of = datetime.now(UTC).date().isoformat()
+    probes = run_split_probes(store, manifests)
+    for result in probes:
+        typer.echo(result.line())
+
+    comparisons = []
+    section = ""
+    if not skip_crosscheck:
+        from axiom.sources.yahoo_events import live_price_fetcher
+
+        comparisons = crosscheck_equities(
+            store, manifests, live_price_fetcher(), sample=sample, years=years, seed=seed
+        )
+        section = crosscheck_markdown(comparisons, as_of=as_of)
+
+    policy, reasoning = classify(probes, comparisons)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        audit_markdown(
+            probes, comparisons, policy, reasoning, as_of=as_of, crosscheck_section=section
+        ),
+        encoding="utf-8",
+    )
+
+    typer.echo("")
+    typer.echo(f"verdict: {policy}")
+    typer.echo(reasoning)
+    typer.echo(f"wrote {out}")
+
+
 @raw_app.command("crosscheck-equities")
 def raw_crosscheck_equities(
     sample: Annotated[int, typer.Option("--sample", help="Tickers to compare.")] = 25,
