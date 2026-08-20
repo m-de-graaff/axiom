@@ -1,0 +1,9 @@
+# v0.0 loop drill. run_id and backend_tag are excluded from the config hash, so every backend
+# running this file is running the same experiment.
+run_id: loop-test-001
+seed: 1337
+total_steps: 1000
+save_every: 100
+sleep_s: 0.05
+backend_tag: local
+schema_version: 0
