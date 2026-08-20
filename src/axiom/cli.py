@@ -389,6 +389,129 @@ def pull_dukascopy(
         raise typer.Exit(1)
 
 
+@pull_app.command("stooq")
+def pull_stooq(
+    archive_url: Annotated[
+        str | None,
+        typer.Option(
+            "--archive-url",
+            help="Direct archive URL, taken from the browser after solving the CAPTCHA.",
+        ),
+    ] = None,
+    from_staging: Annotated[
+        str | None,
+        typer.Option(
+            "--from-staging",
+            help="Path in axiom-raw to read the archive from, e.g. staging/stooq/d_us_txt.zip. "
+            "The ADR-0016 fallback: only when the handed-over URL is bound to the IP that "
+            "solved the CAPTCHA.",
+        ),
+    ] = None,
+    symbols: Annotated[
+        str | None, typer.Option("--symbols", help="Smoke runs only. Comma-separated tickers.")
+    ] = None,
+    limit: Annotated[
+        int | None, typer.Option("--limit", help="Smoke runs only. Tickers, in archive order.")
+    ] = None,
+    dest: Annotated[
+        Path | None,
+        typer.Option("--dest", help="Write to this directory instead of the Hub dataset."),
+    ] = None,
+    run_id: Annotated[str | None, typer.Option("--run-id")] = None,
+    backend_tag: Annotated[str, typer.Option("--backend-tag")] = "local",
+    force: Annotated[
+        bool, typer.Option("--force", help="Re-pull even when the sidecar says it is current.")
+    ] = False,
+) -> None:
+    """Land the US daily equities dump, cloud-side, from a handed-over URL.
+
+    Stooq gates the bulk archive behind a CAPTCHA, so a human does the one thing only a human
+    can: solve it and copy the resulting direct URL. The archive itself is downloaded here, on
+    whatever machine this runs on, and the bytes never touch the laptop (ADR-0016).
+
+    `--from-staging` is the sanctioned fallback for a URL that turns out to be bound to the IP
+    that solved the CAPTCHA. Using it sets `staging_exception_used` in the run manifest, because
+    the zero-bytes-on-the-laptop rule is only a rule if its exceptions are countable.
+    """
+    from datetime import UTC, datetime
+
+    from axiom.provenance.manifest import PullRunManifest
+    from axiom.sources.base import loader_version, run_pull
+    from axiom.sources.stooq import StooqArchive, StooqSource, download_archive
+
+    setup_logging()
+    if bool(archive_url) == bool(from_staging):
+        typer.echo("give exactly one of --archive-url and --from-staging", err=True)
+        raise typer.Exit(2)
+
+    store = _raw_store(dest)
+    work_dir = Path(os.environ.get("AXIOM_STAGING_DIR", "/tmp/axiom-raw-staging")) / "stooq"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    local = work_dir / "d_us_txt.zip"
+
+    if archive_url:
+        typer.echo(f"downloading the archive from {archive_url}")
+        download_archive(archive_url, local)
+        archive = StooqArchive(url=archive_url, path=local)
+    else:
+        typer.echo(f"reading the archive from {from_staging}")
+        data = store.get(str(from_staging))
+        if data is None:
+            typer.echo(f"no archive at {from_staging} in the raw tier", err=True)
+            raise typer.Exit(2)
+        local.write_bytes(data)
+        archive = StooqArchive(
+            url=f"axiom-raw://{from_staging}", path=local, staging_exception_used=True
+        )
+
+    typer.echo(f"archive sha256: {archive.sha256}")
+    pull_run_id = run_id or f"stooq-{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
+
+    with StooqSource(archive) as source:
+        items = source.work_items(symbols=_csv(symbols) if symbols else None, limit=limit)
+        if not items:
+            typer.echo("no tickers matched; check --symbols and the archive layout", err=True)
+            raise typer.Exit(2)
+
+        manifest = PullRunManifest(
+            pull_run_id=pull_run_id,
+            started_at=datetime.now(UTC).isoformat(),
+            loader_version=loader_version(),
+            backend_tag=backend_tag,
+            universe_hash="",  # the archive is the universe; there is nothing to pin separately
+            universe_path=archive.url,
+            markets=["us"],
+            frequencies=["1d"],
+            limit=limit,
+            symbols_filter=_csv(symbols) if symbols else [],
+            staging_exception_used=archive.staging_exception_used,
+        )
+        run = run_pull(source, store, items, manifest, force=force)
+        skipped_short = list(source.skipped_short)
+
+    final = run.finish()
+    _write_run_manifest(store, dest, f"manifests/pulls/{pull_run_id}.json", final)
+
+    typer.echo(
+        f"{pull_run_id}: ok={final.ok} skipped={final.skipped} failed={final.failed} "
+        f"short={len(skipped_short)} rows={final.total_rows} bytes={final.total_bytes}"
+        + (" (PARTIAL)" if final.is_partial else "")
+        + (" (STAGING EXCEPTION USED)" if final.staging_exception_used else "")
+    )
+    for failure in final.failures[:20]:
+        typer.echo(f"  FAIL {failure.symbol}: {failure.error}")
+    if final.failures[20:]:
+        typer.echo(f"  ... and {len(final.failures) - 20} more")
+
+    # ADR-0016 fails the run above a parse-failure rate of 0.1% of files, not on any one file.
+    attempted = final.ok + final.failed
+    rate = final.failed / attempted if attempted else 0.0
+    typer.echo(f"parse-failure rate: {rate:.3%} of {attempted} files")
+    if rate > 0.001:
+        typer.echo("over the 0.1% tolerance", err=True)
+        raise typer.Exit(1)
+
+
 def _write_run_manifest(store, dest: Path | None, path_in_repo: str, final) -> None:
     """Land the run manifest wherever the artifacts went."""
     from axiom.raw.store import LocalRawStore
