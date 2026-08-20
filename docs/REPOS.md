@@ -44,36 +44,43 @@ implemented.
 |---|---|---|---|---|---|
 | `axiom-runs` | dataset | Private | v0.0 | **Live** (2026-08-20) | Checkpoints, run manifests, `latest.json` resume pointers |
 | `axiom-trackio` | space | Private | v0.0 (optional) | Pending | trackio dashboard sync. trackio may auto-create a backing dataset; if it does, add it to this table. |
-| `axiom-raw` | dataset | Private | v0.1 | **Blocked** — see below | Cleaned-source Parquet plus provenance manifests |
+| `axiom-raw` | dataset | Private | v0.1 | **Live** (2026-08-20), not yet writable — see below | Cleaned-source Parquet plus provenance manifests |
 | `axiom-tokenized` | dataset | Private → public at Publish Gate | v0.6 | Planned | Pre-tokenized MDS shards |
 | `axiom-model` | model | Private → public at Publish Gate | v0.9 | Planned | `model.safetensors`, `config.json`, model card |
 
-### `axiom-raw` is blocked on a token permission
+### `axiom-raw` exists; the token cannot see it yet
 
-`create_repo` returns:
+The dataset was created through the web UI on 2026-08-20, private, and the API still cannot
+reach it:
 
 ```
-403 Forbidden: You don't have the rights to create a dataset under the namespace "m-de-graaff"
+m-de-graaff/axiom-runs: VISIBLE private=True
+m-de-graaff/axiom-raw:  RepositoryNotFoundError
 ```
 
-Checked from both sides. The laptop's `.env` token and the `AXIOM_HF_TOKEN` repository secret are
-the same fine-grained `axiom-write` token, both authenticate as `m-de-graaff`, and both are
-refused. It has write access to the `axiom-*` repos that already exist and no permission to
-create new ones under the namespace.
+Two separate limits of the same fine-grained `axiom-write` token, found in this order:
 
-**This blocks the rest of v0.1**: the smoke run, the kill drill, the full pull, `raw verify`,
-`raw stats`, the QA report, and the tag all need somewhere to write.
+1. `create_repo` returns `403 Forbidden: You don't have the rights to create a dataset under the
+   namespace "m-de-graaff"` — checked from the laptop and from an Actions runner, same token,
+   same refusal. Worked around by creating the dataset by hand.
+2. `repo_info` on the new dataset returns 404 while the same call on `axiom-runs` succeeds. On a
+   private repo a 404 means "invisible to this token": the token is pinned to an explicit repo
+   list fixed when it was minted, and `axiom-raw` is not on it.
 
-Two ways out, either is fine and neither needs code:
+**The second one still blocks the rest of v0.1**: the smoke run, the kill drill, the full pull,
+`raw verify`, `raw stats`, the QA report, and the tag all need to write there.
 
-1. Add **Create repos** (write access to all repos under the namespace) to the `axiom-write`
-   token at <https://huggingface.co/settings/tokens>.
-2. Create the dataset by hand at <https://huggingface.co/new-dataset> — name `axiom-raw`, owner
-   `m-de-graaff`, **Private** — and confirm the token's repo scope covers it.
+The fix is one edit, and it is deliberately a human one — widening what an API token may reach is
+not something an agent should do on the account's behalf:
 
-Then run `just bootstrap-raw`, which creates the dataset if it is still missing and seeds its
-front page from `remote/hf/axiom-raw-README.md` — the versioned source of truth for it. The job
-is idempotent, so it is safe either way, and it asserts the dataset is private before it exits.
+1. Open <https://huggingface.co/settings/tokens> and click the **`axiom-write`** token.
+2. Under **Repository permissions**, add `m-de-graaff/axiom-raw` with **Write**.
+3. Save. The `AXIOM_HF_TOKEN` repository secret is the same token, so Actions picks the change up
+   with nothing to re-paste.
+
+Then run `just bootstrap-raw`. It creates the dataset if it is somehow still missing, seeds its
+front page from `remote/hf/axiom-raw-README.md` — the versioned source of truth for it — and
+asserts the dataset is private before it exits. It is idempotent, so it is safe to run either way.
 
 ## Execution backends
 
