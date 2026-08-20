@@ -34,6 +34,13 @@ on:
       concurrency:
         description: Cap on simultaneous requests to the bucket.
         default: "12"
+      dry_run:
+        description: >-
+          Write to the runner's disk instead of the Hub. Verifies the fetch, checksum, parse and
+          validate path against the real bucket without publishing anything, and leaves nothing
+          behind when the runner is torn down.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -74,4 +81,4 @@ jobs:
             --concurrency '${{ inputs.concurrency }}' \
             ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }} \
             ${{ inputs.symbols && format('--symbols {0}', inputs.symbols) || '' }} \
-            ${{ inputs.run_id && format('--run-id {0}', inputs.run_id) || '' }}
+            ${{ inputs.run_id && format('--run-id {0}', inputs.run_id) || '' }}             ${{ inputs.dry_run && format('--dest {0}/raw-dryrun', runner.temp) || '' }}

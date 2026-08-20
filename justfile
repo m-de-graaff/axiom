@@ -85,6 +85,10 @@ pull-binance *ARGS:
 pull-smoke:
     gh workflow run pull.yml -f markets=spot -f symbols=BTCUSDT,ETHUSDT
 
+# Same path against the real bucket, writing to the runner's disk and publishing nothing.
+pull-dryrun symbols="BTCUSDT,ETHUSDT":
+    gh workflow run pull.yml -f dry_run=true -f symbols={{symbols}}
+
 pull-watch:
     gh run watch $(gh run list --workflow=pull.yml --limit 1 --json databaseId -q '.[0].databaseId') --exit-status
 
