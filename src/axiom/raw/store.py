@@ -31,6 +31,8 @@ class RawStore(Protocol):
 
     def read_sidecar(self, artifact_path: str) -> FileManifest | None: ...
 
+    def get(self, artifact_path: str) -> bytes | None: ...
+
     def put(self, artifact_path: str, data: bytes, manifest: FileManifest) -> None: ...
 
     def list_manifests(self) -> list[FileManifest]: ...
@@ -52,6 +54,10 @@ class LocalRawStore:
         if not path.exists():
             return None
         return FileManifest.from_json(path.read_text(encoding="utf-8"))
+
+    def get(self, artifact_path: str) -> bytes | None:
+        path = self._path(artifact_path)
+        return path.read_bytes() if path.exists() else None
 
     def put(self, artifact_path: str, data: bytes, manifest: FileManifest) -> None:
         path = self._path(artifact_path)
@@ -115,6 +121,29 @@ class HubRawStore:
         except Exception as exc:  # a network blip must not be read as "not pulled yet"
             raise RuntimeError(f"could not read sidecar for {artifact_path}: {exc}") from exc
         return FileManifest.from_json(Path(path).read_text(encoding="utf-8"))
+
+    def get(self, artifact_path: str) -> bytes | None:
+        """Read an artifact back out of the dataset.
+
+        A source that extends a series rather than rebuilding it needs the rows it already
+        landed. Missing is not an error -- it is the first pull.
+        """
+        from huggingface_hub import hf_hub_download
+        from huggingface_hub.errors import EntryNotFoundError, RepositoryNotFoundError
+
+        staged = self.staging / artifact_path
+        if staged.exists():  # written this run and not yet committed
+            return staged.read_bytes()
+        try:
+            path = hf_hub_download(
+                repo_id=self.repo_id,
+                filename=artifact_path,
+                repo_type="dataset",
+                token=self._token,
+            )
+        except (EntryNotFoundError, RepositoryNotFoundError):
+            return None
+        return Path(path).read_bytes()
 
     def list_manifests(self) -> list[FileManifest]:
         """Every sidecar in the dataset.

@@ -30,6 +30,21 @@ FREQUENCIES: dict[str, int] = {"1h": 3_600_000, "1d": 86_400_000}
 #: Columns downstream consumes. Everything else in the schema is retained raw detail.
 OHLCVA = ("open", "high", "low", "close", "volume", "amount")
 
+#: Trading calendars a file can declare, as file-level metadata (ADR-0014). Not a column.
+#:
+#: - ``24x7``   crypto: every grid slot is tradeable, and a gap is an outage
+#: - ``24x5``   FX and CFDs: one continuous session from Sunday evening to Friday evening
+#: - ``XNYS-regular``  US equities, regular hours, one bar per exchange calendar date
+SESSIONS = frozenset({"24x7", "24x5", "XNYS-regular"})
+
+#: The span no intraday 24x5 bar may fall in.
+#:
+#: Dukascopy's week boundary follows its server clock, which observes European DST: the week
+#: opens 22:00 UTC Sunday in winter and 21:00 UTC in summer, and closes at the matching hour on
+#: Friday. A sharp edge would fail twice a year on real data, so the assertion is the span that
+#: is closed under both regimes -- all of Saturday, and Sunday until 20:00 UTC (ADR-0015).
+WEEKEND_CLOSE_UNTIL_HOUR_UTC = 20
+
 #: A ts above this is not a plausible millisecond timestamp (it would be year 5138), so it is
 #: microseconds. Binance Vision has shipped both units; the parser detects rather than trusts.
 _US_THRESHOLD = 10**14
@@ -141,15 +156,29 @@ def validate_bars(
     table: pa.Table,
     frequency: str,
     *,
+    session_id: str = "24x7",
     raise_on_error: bool = False,
 ) -> ValidationReport:
     """Check every ADR-0010 invariant over ``table``, vectorized.
 
-    Gaps in the timestamp grid are not a violation. A gap is a fact about the market -- a halt, a
-    listing that had not happened yet, an outage at the exchange -- and the raw tier records
-    facts. Filling one would be the cleaning pass that v0.3 owns.
+    Gaps in the timestamp grid are not a violation, under any session. A gap is a fact about the
+    market -- a halt, a weekend, a listing that had not happened yet, an outage at the exchange --
+    and the raw tier records facts. Filling one would be the cleaning pass that v0.3 owns. That
+    holds for crypto too: a 24x7 series with a missing hour is *counted*, never failed, because
+    "the exchange was down" is data.
+
+    ``session_id`` adds the two checks that only make sense once a market can be shut:
+
+    - **24x5 intraday** -- a bar inside the weekend close is a violation. Nothing traded then, so
+      a bar there means the timestamps are wrong, not that the market was busy.
+    - **XNYS-regular daily** -- bars must sit exactly on 00:00 UTC. For crypto that alignment is a
+      warning, because Binance really does publish phase-shifted bars after a restart; for a
+      vendor's daily equity dump it is a parse guarantee, and a violation of it means the date
+      column was misread.
     """
     step = grid_step_ms(frequency)
+    if session_id not in SESSIONS:
+        raise ValueError(f"unknown session_id {session_id!r}; expected one of {sorted(SESSIONS)}")
     report = ValidationReport(frequency=frequency, row_count=table.num_rows)
 
     missing = [name for name in BARS_SCHEMA_V1.names if name not in table.column_names]
@@ -185,7 +214,10 @@ def validate_bars(
     # after the last. Those are real bars that really traded. Snapping them to the grid would
     # be imputation, and rejecting them would throw away the most important series in the
     # corpus over 0.05% of its rows. They are counted into the manifest instead (ADR-0010).
-    _record(report, "ts_off_grid", ts % step != 0, warning=True)
+    off_grid = ts % step != 0
+    strict_grid = session_id == "XNYS-regular" and step >= 86_400_000
+    _record(report, "ts_off_grid", off_grid, warning=not strict_grid)
+    _record(report, "bars_in_weekend_close", closed_window_bars(ts, session_id, frequency))
 
     open_, high, low, close = (columns[k] for k in ("open", "high", "low", "close"))
     _record(report, "high_below_open_or_close", high < np.maximum(open_, close))
@@ -197,6 +229,28 @@ def validate_bars(
     if raise_on_error:
         report.raise_for_status()
     return report
+
+
+def weekday_utc(ts: np.ndarray) -> np.ndarray:
+    """Day of week per timestamp, 0 = Monday.
+
+    1970-01-01 was a Thursday, which is index 3 under a Monday-first convention -- hence the +3.
+    """
+    return ((ts // 86_400_000) + 3) % 7
+
+
+def closed_window_bars(ts: np.ndarray, session_id: str, frequency: str) -> np.ndarray:
+    """Boolean mask of bars that fall when ``session_id`` says the market was shut.
+
+    Only meaningful for intraday bars. A daily bar is stamped at 00:00 UTC of its calendar date
+    by convention (ADR-0014), so a 24x5 daily series legitimately carries a Sunday bar -- the
+    two-hour tail of the week's opening evening -- and testing its hour would reject real data.
+    """
+    if session_id != "24x5" or grid_step_ms(frequency) >= 86_400_000:
+        return np.zeros(len(ts), dtype=bool)
+    dow = weekday_utc(ts)
+    hour = (ts % 86_400_000) // 3_600_000
+    return (dow == 5) | ((dow == 6) & (hour < WEEKEND_CLOSE_UNTIL_HOUR_UTC))
 
 
 def count_off_grid(ts: np.ndarray | pa.ChunkedArray, frequency: str) -> int:

@@ -43,6 +43,22 @@ VOLATILE_MANIFEST_FIELDS: frozenset[str] = frozenset(
     {"pull_run_id", "pulled_at", "artifact_sha256", "loader_version"}
 )
 
+#: Fields v0.2 added (ADR-0014), with the value that means "what v0.1 already meant".
+#:
+#: A field holding its default is dropped from the identity payload rather than hashed as a
+#: default. That is what makes the extension backward compatible: a v0.1 sidecar, which has none
+#: of these keys at all, hashes to exactly the same digest as the same manifest loaded by v0.2
+#: code and filled in with defaults. Without this, adding an optional field with a default would
+#: silently invalidate every sidecar already in `axiom-raw` -- they would load, recompute a
+#: different hash, and be reported as edited.
+#:
+#: ``source_symbol`` is not here because its default is not a constant: it defaults to the
+#: symbol, and is dropped when it equals it.
+V02_DEFAULTED_FIELDS: dict[str, Any] = {
+    "price_side": "trade",
+    "redistribution_class": "loader_manifest_private_cache",
+}
+
 
 class FileManifest(BaseModel):
     """Provenance for exactly one Parquet file in the raw tier."""
@@ -83,6 +99,13 @@ class FileManifest(BaseModel):
     amount_synthesized: bool = False
     adjustment_policy: str = "none"
 
+    #: What the four prices are quotes of: `trade` or `bid` (ADR-0014).
+    price_side: str = "trade"
+    #: What the vendor calls this instrument. Defaults to our own symbol when they agree.
+    source_symbol: str = ""
+    #: Which row of `docs/DATA_LICENSING.md` governs this file.
+    redistribution_class: str = "loader_manifest_private_cache"
+
     universe_hash: str
 
     @model_validator(mode="after")
@@ -95,12 +118,22 @@ class FileManifest(BaseModel):
         return self
 
     def identity_payload(self) -> dict[str, Any]:
-        """The subset of fields the identity hash is taken over."""
-        return {
+        """The subset of fields the identity hash is taken over.
+
+        Volatile fields are excluded, and a v0.2 field holding its v0.1-equivalent default is
+        omitted entirely -- see :data:`V02_DEFAULTED_FIELDS`.
+        """
+        payload = {
             k: v
             for k, v in self.model_dump(mode="json").items()
             if k not in VOLATILE_MANIFEST_FIELDS
         }
+        for key, default in V02_DEFAULTED_FIELDS.items():
+            if payload.get(key) == default:
+                payload.pop(key, None)
+        if payload.get("source_symbol") in ("", payload.get("symbol")):
+            payload.pop("source_symbol", None)
+        return payload
 
     @property
     def manifest_sha256(self) -> str:
@@ -158,6 +191,10 @@ class PullRunManifest(BaseModel):
     # rather than only appearing in somebody's shell history.
     limit: int | None = None
     symbols_filter: list[str] = Field(default_factory=list)
+
+    #: True when market-data bytes transited the laptop under the one exception ADR-0016 allows.
+    #: The rule is only a rule if the exceptions are countable.
+    staging_exception_used: bool = False
 
     ok: int = 0
     skipped: int = 0
