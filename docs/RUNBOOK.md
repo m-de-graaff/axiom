@@ -197,9 +197,19 @@ Recorded result, 2026-08-20: killed at step 2000 of 6000, resumed, finished at
 Nothing on Kaggle's side other than the log matters. The kernel's filesystem is disposable by
 design; the checkpoint on the Hub is the only durable state.
 
-Recorded result, 2026-08-20: a full uninterrupted Kaggle run reached
-`acc=996.4922949671745` at step 2000, matching the laptop exactly. The kill-and-resume half of
-the Kaggle drill is still outstanding.
+Recorded results, 2026-08-20, all at seed 1337:
+
+| Backend | Run | Final `acc` |
+|---|---|---|
+| Laptop | 2000 steps, uninterrupted | 996.4922949671745 |
+| Kaggle | 2000 steps, uninterrupted | 996.4922949671745 |
+| GitHub Actions | 2000 steps, uninterrupted | 996.4922949671745 |
+| Laptop | 6000 steps, uninterrupted | 3018.7626345157623 |
+| Kaggle | **killed at 3000**, resumed to 6000 | 3018.7626345157623 |
+| GitHub Actions | **killed at 2000**, resumed to 6000 | 3018.7626345157623 |
+
+Both kills were real: Stop Session on Kaggle, `gh run cancel` on Actions. Neither used the
+`AXIOM_KILL_AT_STEP` fault injection, which exists for the local test only.
 
 ## When a Kaggle session dies
 

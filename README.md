@@ -19,6 +19,7 @@ This banner goes verbatim into the model card.
 - `.artifacts/roadmap.md` — the v0.0 → v1.0 version ladder, gates, and compute budget.
 - `docs/ARCHITECTURE.md` — the component map and which version delivers each piece.
 - `docs/adr/` — the locked design decisions.
+- `docs/GATES.md` — what each gate required and the evidence it passed on.
 - `docs/REPOS.md` — every repo and account this project uses.
 - `docs/RUNBOOK.md` — tokens, rotation, dispatch recipes, what to do when a session dies.
 
