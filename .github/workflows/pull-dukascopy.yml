@@ -64,6 +64,17 @@ jobs:
       # runs every loader through a synthetic fetcher and must not acquire a network dependency.
       - run: uv sync --frozen --extra data
 
+      # `dukascopy-python` reads a JSON chart endpoint, not the static .bi5 datafeed, and it
+      # returns an empty frame rather than raising when that endpoint refuses. So a block and a
+      # bug look identical in the pull's output unless the endpoint is asked directly first.
+      - name: Reachability probe
+        run: |
+          echo "runner egress IP: $(curl -sS --max-time 20 https://api.ipify.org || echo unknown)"
+          url='https://freeserv.dukascopy.com/2.0/index.php?path=chart/json3&instrument=EUR/USD&offer_side=B&interval=1DAY&splits=true&stocks=true&time_direction=N&timestamp=1704067200000&jsonp='
+          code=$(curl -sS -o /tmp/dk.json -w '%{http_code}' --max-time 40 "$url" || echo 000)
+          echo "freeserv.dukascopy.com HTTP $code, $(wc -c < /tmp/dk.json) bytes"
+          head -c 300 /tmp/dk.json; echo
+
       - name: Pull Dukascopy into axiom-raw
         env:
           AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}

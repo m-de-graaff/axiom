@@ -283,7 +283,16 @@ class DukascopySource:
 
         table = splice(prior, fresh)
         if not table.num_rows:
-            raise ValueError(f"{item}: no bars in {first_fetch_year}-{self.as_of.year}")
+            # The library returns an empty frame rather than raising when the feed refuses, so
+            # "every year came back empty" is almost never a fact about the instrument -- it is
+            # the feed declining to answer this host. Say which, because the two have completely
+            # different fixes (ADR-0015's fallback ladder versus a universe correction).
+            raise ValueError(
+                f"{item}: every year from {first_fetch_year} to {self.as_of.year} came back "
+                f"empty for {item.vendor_symbol!r}. An instrument with a pinned start date does "
+                "not have zero bars across its whole history, so this is the feed refusing this "
+                "host rather than a gap in the data -- see the reachability ladder in ADR-0015"
+            )
         return table
 
     def manifest_extras(self, item: WorkItem) -> dict[str, Any]:
