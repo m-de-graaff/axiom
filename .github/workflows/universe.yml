@@ -1,0 +1,57 @@
+# Build the pinned universe in the cloud and hand the result back as a workflow artifact.
+#
+# This job downloads roughly two thousand small archives to rank them, which makes it market
+# data, which makes it cloud work. The laptop's role is to dispatch it and to commit the YAML it
+# produces — the universe is code, and code belongs in git rather than on the Hub.
+
+name: universe
+
+on:
+  workflow_dispatch:
+    inputs:
+      month:
+        description: Selection month, YYYY-MM. Pinned, never "now".
+        required: true
+      markets:
+        description: Space-separated market=count pairs.
+        default: spot=200 um=100
+      concurrency:
+        description: Cap on simultaneous requests to the bucket.
+        default: "12"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: universe-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv sync --frozen
+
+      - name: Rank the bucket
+        env:
+          AXIOM_GIT_COMMIT: ${{ github.sha }}
+          AXIOM_DISABLE_TRACKING: "1"
+        run: |
+          uv run axiom universe build \
+            --month '${{ inputs.month }}' \
+            $(for m in ${{ inputs.markets }}; do echo --market "$m"; done) \
+            --concurrency '${{ inputs.concurrency }}' \
+            --out src/axiom/configs/universe_v1.yaml
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: universe_v1
+          path: src/axiom/configs/universe_v1.yaml
+          if-no-files-found: error

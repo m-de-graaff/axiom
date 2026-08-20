@@ -63,3 +63,39 @@ loop-modal:
 # Delete local checkpoint trees. The durable copies live in axiom-runs.
 clean-checkpoints:
     rm -rf checkpoints
+
+# --- the v0.1 data jobs ---
+
+# Build the pinned universe in the cloud, then fetch the YAML it produced.
+universe-build month:
+    gh workflow run universe.yml -f month={{month}}
+
+universe-fetch:
+    gh run download $(gh run list --workflow=universe.yml --limit 1 --json databaseId -q '.[0].databaseId') -n universe_v1 -D src/axiom/configs
+
+# Print a universe's criteria and counts, verifying its hash.
+universe-show path="universe_v1":
+    uv run axiom universe show {{path}}
+
+# Dispatch the Binance pull. Extra flags go through as workflow inputs; see .github/workflows/pull.yml.
+pull-binance *ARGS:
+    gh workflow run pull.yml {{ARGS}}
+
+# Smoke run: two majors, spot only, both frequencies.
+pull-smoke:
+    gh workflow run pull.yml -f markets=spot -f symbols=BTCUSDT,ETHUSDT
+
+pull-watch:
+    gh run watch $(gh run list --workflow=pull.yml --limit 1 --json databaseId -q '.[0].databaseId') --exit-status
+
+pull-log:
+    gh run view $(gh run list --workflow=pull.yml --limit 1 --json databaseId -q '.[0].databaseId') --log
+
+# Kill the newest pull mid-flight. A real SIGKILL of the runner, for the resume drill.
+pull-kill:
+    gh run cancel $(gh run list --workflow=pull.yml --limit 1 --json databaseId -q '.[0].databaseId')
+
+# Pull into a local directory instead of the Hub. Development only — this writes market data to
+# the machine it runs on, which the laptop must never do.
+pull-local symbols="BTCUSDT":
+    uv run axiom pull binance --symbols {{symbols}} --markets spot --dest .artifacts/raw-local
