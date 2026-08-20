@@ -22,10 +22,12 @@ config_app = typer.Typer(no_args_is_help=True, help="Inspect run configuration."
 loop_app = typer.Typer(no_args_is_help=True, help="The v0.0 dispatch/checkpoint/resume loop.")
 universe_app = typer.Typer(no_args_is_help=True, help="Build and inspect the pinned universe.")
 pull_app = typer.Typer(no_args_is_help=True, help="Land source data in the raw tier.")
+raw_app = typer.Typer(no_args_is_help=True, help="Inspect, verify and summarize the raw tier.")
 app.add_typer(config_app, name="config")
 app.add_typer(loop_app, name="loop")
 app.add_typer(universe_app, name="universe")
 app.add_typer(pull_app, name="pull")
+app.add_typer(raw_app, name="raw")
 
 
 def _csv(value: str) -> list[str]:
@@ -309,6 +311,140 @@ def pull_binance(
         typer.echo(f"  FAIL {failure.market}/{failure.frequency}/{failure.symbol}: {failure.error}")
     if final.failed:
         raise typer.Exit(1)
+
+
+def _raw_store(dest: Path | None):
+    """A local directory when one is named, otherwise the private `axiom-raw` dataset."""
+    from axiom.config.settings import AxiomSettings
+    from axiom.raw.store import HubRawStore, LocalRawStore
+
+    if dest is not None:
+        return LocalRawStore(dest)
+    settings = AxiomSettings()
+    token = settings.hf_token.get_secret_value() if settings.hf_token else None
+    return HubRawStore(
+        settings.raw_repo_id,
+        token=token,
+        staging=Path(os.environ.get("AXIOM_STAGING_DIR", "/tmp/axiom-raw-staging")),
+    )
+
+
+@raw_app.command("inspect")
+def raw_inspect(
+    symbol: Annotated[str, typer.Argument(help="Symbol, e.g. BTCUSDT.")],
+    market: Annotated[str, typer.Option("--market")] = "spot",
+    frequency: Annotated[str, typer.Option("--frequency")] = "1h",
+    rows: Annotated[int, typer.Option("--rows", help="Offending rows to print per code.")] = 8,
+    concurrency: Annotated[int, typer.Option("--concurrency")] = 12,
+) -> None:
+    """Fetch one series, validate it, and print what is wrong — writing nothing anywhere.
+
+    This is what to reach for when a pull reports a symbol failed on an invariant. It reproduces
+    the failure and shows the rows that caused it, which is the difference between "43 rows are
+    off the grid" and knowing which 43.
+    """
+    import numpy as np
+
+    from axiom.schema.bars import count_gaps, grid_step_ms, validate_bars
+    from axiom.sources.binance import PullTask, build_table, enumerate_sources
+    from axiom.sources.binance_vision import BinanceVision
+
+    setup_logging()
+    task = PullTask(market, symbol.upper(), frequency)
+    with BinanceVision(concurrency=concurrency) as client:
+        urls = enumerate_sources(client, task)
+        typer.echo(f"{task}: {len(urls)} source archive(s)")
+        table = build_table(client, task, urls, validate=False)
+
+    ts = table["ts"].to_numpy(zero_copy_only=False)
+    step = grid_step_ms(frequency)
+    typer.echo(f"rows={table.num_rows} first_ts={int(ts[0])} last_ts={int(ts[-1])}")
+    typer.echo(f"gaps={count_gaps(ts, frequency)} step_ms={step}")
+
+    report = validate_bars(table, frequency)
+    typer.echo(report.summary())
+    for code, violation in sorted(report.violations.items()):
+        typer.echo(f"\n{code}: {violation}")
+        if code == "ts_off_grid":
+            offenders = np.flatnonzero(ts % step != 0)[:rows]
+        elif code == "ts_not_increasing":
+            offenders = (np.flatnonzero(np.diff(ts) <= 0) + 1)[:rows]
+        else:
+            offenders = np.array([violation.first_row])
+        for index in offenders:
+            row = {k: v[0] for k, v in table.slice(int(index), 1).to_pydict().items()}
+            typer.echo(f"  [{index}] offset={int(ts[index]) % step} {row}")
+
+
+@raw_app.command("verify")
+def raw_verify(
+    sample: Annotated[int, typer.Option("--sample", help="Series to re-derive.")] = 10,
+    seed: Annotated[
+        int, typer.Option("--seed", help="Sampling seed. Same seed, same picks.")
+    ] = 1337,
+    dest: Annotated[
+        Path | None, typer.Option("--dest", help="Verify a local tier instead.")
+    ] = None,
+    out: Annotated[
+        Path | None, typer.Option("--out", help="Write the report here as well.")
+    ] = None,
+    concurrency: Annotated[int, typer.Option("--concurrency")] = 12,
+) -> None:
+    """Re-derive a sample of series from the archives their manifests name and compare the bytes.
+
+    Exits non-zero if any sampled series fails to reproduce. A series that has gained days since
+    it was pulled still reproduces its recorded bytes and is reported as drift, not failure.
+    """
+    from axiom.raw.qa import sample_tasks, stats_markdown, verify_series
+    from axiom.sources.binance_vision import BinanceVision
+
+    setup_logging()
+    store = _raw_store(dest)
+    manifests = store.list_manifests()
+    if not manifests:
+        typer.echo("the raw tier is empty; nothing to verify", err=True)
+        raise typer.Exit(2)
+
+    tasks = sample_tasks(manifests, sample, seed)
+    with BinanceVision(concurrency=concurrency) as client:
+        results = [verify_series(client, store, task) for task in tasks]
+
+    for result in results:
+        typer.echo(result.line())
+    identical = sum(1 for r in results if r.byte_identical)
+    typer.echo(f"\n{identical}/{len(results)} byte-identical, seed={seed}")
+
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(stats_markdown(manifests, results), encoding="utf-8")
+        typer.echo(f"wrote {out}")
+
+    if any(not r.ok for r in results):
+        raise typer.Exit(1)
+
+
+@raw_app.command("stats")
+def raw_stats(
+    dest: Annotated[Path | None, typer.Option("--dest", help="Read a local tier instead.")] = None,
+    out: Annotated[
+        Path | None, typer.Option("--out", help="Write the markdown report here.")
+    ] = None,
+) -> None:
+    """Summarize the raw tier from its sidecars: counts, history, gaps, and the gate."""
+    from axiom.raw.qa import stats_markdown
+
+    setup_logging()
+    manifests = _raw_store(dest).list_manifests()
+    if not manifests:
+        typer.echo("the raw tier is empty", err=True)
+        raise typer.Exit(2)
+
+    report = stats_markdown(manifests)
+    typer.echo(report)
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(report, encoding="utf-8")
+        typer.echo(f"wrote {out}")
 
 
 if (

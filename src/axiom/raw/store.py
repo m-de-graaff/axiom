@@ -33,6 +33,8 @@ class RawStore(Protocol):
 
     def put(self, artifact_path: str, data: bytes, manifest: FileManifest) -> None: ...
 
+    def list_manifests(self) -> list[FileManifest]: ...
+
     def flush(self) -> None: ...
 
 
@@ -56,6 +58,10 @@ class LocalRawStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
         self._path(artifact_path + SIDECAR_SUFFIX).write_text(manifest.to_json(), encoding="utf-8")
+
+    def list_manifests(self) -> list[FileManifest]:
+        paths = sorted(self.root.rglob(f"*{SIDECAR_SUFFIX}"))
+        return [FileManifest.from_json(p.read_text(encoding="utf-8")) for p in paths]
 
     def flush(self) -> None:
         return None
@@ -109,6 +115,28 @@ class HubRawStore:
         except Exception as exc:  # a network blip must not be read as "not pulled yet"
             raise RuntimeError(f"could not read sidecar for {artifact_path}: {exc}") from exc
         return FileManifest.from_json(Path(path).read_text(encoding="utf-8"))
+
+    def list_manifests(self) -> list[FileManifest]:
+        """Every sidecar in the dataset.
+
+        A few hundred small JSON files, which is cheap enough to fetch whole and much simpler
+        than maintaining an index that could disagree with them. That index is the v0.2 corpus
+        registry, and it will be built over these files rather than instead of them.
+        """
+        from huggingface_hub import hf_hub_download
+
+        names = [
+            name
+            for name in self._api.list_repo_files(self.repo_id, repo_type="dataset")
+            if name.endswith(SIDECAR_SUFFIX)
+        ]
+        manifests = []
+        for name in sorted(names):
+            path = hf_hub_download(
+                repo_id=self.repo_id, filename=name, repo_type="dataset", token=self._token
+            )
+            manifests.append(FileManifest.from_json(Path(path).read_text(encoding="utf-8")))
+        return manifests
 
     # --- writes -----------------------------------------------------------------------
 

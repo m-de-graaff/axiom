@@ -1,0 +1,84 @@
+# Inspection, verification and QA over the raw tier, run where the data is allowed to be.
+#
+# `inspect` needs no Hub access at all — it fetches one series from the bucket, validates it, and
+# prints what is wrong. It is the tool for a symbol that failed a pull, and it is safe to run
+# against anything.
+#
+# `verify` and `stats` read `axiom-raw`, and `verify` re-downloads the archives a manifest names.
+
+name: raw
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: What to run.
+        type: choice
+        options: [inspect, verify, stats]
+        default: inspect
+      symbol:
+        description: inspect only — the symbol to look at.
+        default: BTCUSDT
+      market:
+        description: inspect only — spot or um.
+        default: spot
+      frequency:
+        description: inspect only — 1h or 1d.
+        default: 1h
+      sample:
+        description: verify only — how many series to re-derive.
+        default: "10"
+      concurrency:
+        description: Cap on simultaneous requests to the bucket.
+        default: "12"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: raw-qa
+  cancel-in-progress: false
+
+jobs:
+  raw:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv sync --frozen
+
+      - name: Run the raw-tier command
+        env:
+          AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
+          AXIOM_GIT_COMMIT: ${{ github.sha }}
+          AXIOM_DISABLE_TRACKING: "1"
+        run: |
+          case '${{ inputs.command }}' in
+            inspect)
+              uv run axiom raw inspect '${{ inputs.symbol }}' \
+                --market '${{ inputs.market }}' \
+                --frequency '${{ inputs.frequency }}' \
+                --concurrency '${{ inputs.concurrency }}'
+              ;;
+            verify)
+              uv run axiom raw verify \
+                --sample '${{ inputs.sample }}' \
+                --concurrency '${{ inputs.concurrency }}' \
+                --out docs/reports/v0.1-raw-qa.md
+              ;;
+            stats)
+              uv run axiom raw stats --out docs/reports/v0.1-raw-qa.md
+              ;;
+          esac
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: inputs.command != 'inspect'
+        with:
+          name: v0.1-raw-qa
+          path: docs/reports/v0.1-raw-qa.md
+          if-no-files-found: error

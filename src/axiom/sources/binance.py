@@ -93,12 +93,24 @@ def enumerate_sources(client: BinanceVision, task: PullTask) -> list[str]:
     ] + [zip_url(task.market, "daily", task.symbol, task.frequency, period) for period in days]
 
 
-def build_table(client: BinanceVision, task: PullTask, urls: list[str], digests: list[str]):
-    """Download, verify, parse, merge, validate. Returns the table ready to write."""
+def build_table(
+    client: BinanceVision,
+    task: PullTask,
+    urls: list[str],
+    digests: list[str] | None = None,
+    *,
+    validate: bool = True,
+) -> pa.Table:
+    """Download, verify, parse, merge, validate. Returns the table ready to write.
+
+    ``validate=False`` exists for `axiom raw inspect`, which needs to look at a series precisely
+    because it fails validation. Nothing that writes may pass it.
+    """
     archives = client.fetch_all(urls, digests)
     tables = [parse_archive(archive.data) for archive in archives]
     table = merge(tables, context=str(task))
-    validate_bars(table, task.frequency, raise_on_error=True)
+    if validate:
+        validate_bars(table, task.frequency, raise_on_error=True)
     return table
 
 
