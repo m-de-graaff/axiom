@@ -292,6 +292,22 @@ every start. `gh run cancel` SIGKILLs the runner, so this is a real interruption
 The one thing to check in the second run's log is that skipped symbols cost no archive
 downloads — a skip is a listing plus a handful of tiny `.CHECKSUM` fetches, nothing more.
 
+**Recorded result, 2026-08-20.** A `--limit 40` run was cancelled after 7 minutes with
+`gh run cancel`, which SIGKILLs the runner. At that moment 30 series had been built in-process and
+**29 were committed** to `axiom-raw` — the thirtieth was still in the staging directory and died
+with the container, which is the intended trade: staged-but-uncommitted work is lost, committed
+work survives, and nothing lands half-written.
+
+The relaunch was byte-for-byte the same dispatch, with no resume flag, because there is no resume
+flag:
+
+```
+kill-drill-resume: ok=131 skipped=29 failed=0 rows=2517297 bytes=143162567 (PARTIAL)
+```
+
+29 skipped, matching the 29 committed, and the remaining 131 finished. That is the whole
+mechanism: the sidecars are the state.
+
 ### When a pull fails partway
 
 Dispatch it again. That is the whole procedure. The finished series skip, the unfinished ones are
