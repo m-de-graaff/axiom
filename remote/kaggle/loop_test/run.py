@@ -57,8 +57,12 @@ def install(gh_pat: str) -> None:
 
 
 def main() -> None:
-    gh_pat, hf_token = read_secrets()
+    # Report the image before touching secrets. ADR-0007 leaves the Python floor provisional
+    # until a real kernel says otherwise, and a run that dies on a missing secret should still
+    # answer that question rather than taking the diagnostic down with it.
     report_image()
+
+    gh_pat, hf_token = read_secrets()
     install(gh_pat)
 
     os.environ["AXIOM_HF_TOKEN"] = hf_token

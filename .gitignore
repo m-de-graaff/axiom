@@ -17,6 +17,8 @@ runs/
 *.safetensors
 *.pt
 
+.artifacts/kaggle-out/
+
 # Build / tool caches
 dist/
 build/

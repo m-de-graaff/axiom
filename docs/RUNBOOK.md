@@ -103,13 +103,27 @@ The slow drills are marked: `uv run pytest -m slow` runs only the kill-and-resum
    Account → Phone verify. This needs a real phone and an SMS code, so it cannot be automated.
 2. Settings → API Tokens → Generate New Token, saved to `~/.kaggle/kaggle.json`, chmod 600.
 3. Add both secrets under Add-ons → Secrets in the kernel editor: `GH_PAT` (the GitHub PAT) and
-   `HF_TOKEN` (the Hugging Face token). Both values are in the laptop's `.env`.
+   `HF_TOKEN` (the Hugging Face token). Both values are in the laptop's `.env`. Attach both to
+   the kernel, not just create them — an unattached secret is invisible to the run.
 4. `uv run kaggle kernels push -p remote/kaggle/loop_test` (or `just loop-kaggle`).
+
+A run whose secrets are missing or unattached fails like this, about a second in:
+
+```
+client.get_secret("GH_PAT")
+urllib.error.HTTPError: HTTP Error 400: Bad Request
+ConnectionError: Connection error trying to communicate with service.
+```
+
+The `ConnectionError` is misleading — the network is fine, the secret is simply not attached.
 
 The kernel prints its Python and torch versions on startup. **Record them in this file and amend
 ADR-0007 if Kaggle's Python is below the 3.11 floor.**
 
-Kaggle image versions observed: _not yet recorded — fill in after the first dispatch._
+Kaggle image versions observed (2026-08-20, first dispatch): **Python 3.12**, read from the
+interpreter paths in the kernel log. That is above the `>=3.11` floor, so ADR-0007 stands and
+needs no amendment. The torch version is still unrecorded — the first run died before
+`report_image()`, which is why that call now happens before secrets are read.
 
 ### Before the first Modal dispatch
 
