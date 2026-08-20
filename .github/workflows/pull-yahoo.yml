@@ -1,0 +1,56 @@
+# The v0.2 yfinance adjunct: split and dividend events for the pinned cross-check population.
+#
+# Non-load-bearing by design (ADR-0016). Yahoo has no licence, no stability promise, and an
+# active habit of refusing datacenter IPs. This workflow is allowed to come back with nothing;
+# that outcome is a dated line in the adjustment audit, not a failure of the version.
+#
+# Paced to at most 300 requests an hour with jitter, so a full run of ~500 tickers takes about
+# two hours of runner time. Re-dispatching the same day skips what already landed.
+
+name: pull-yahoo
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: Tickers, in file order. Empty means the whole pinned list.
+        default: ""
+      as_of:
+        description: Pin the run's date, YYYY-MM-DD. Empty means today.
+        default: ""
+      dry_run:
+        description: Write to the runner's disk instead of the Hub.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pull-yahoo
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv sync --frozen --extra data
+
+      - name: Capture adjustment events
+        env:
+          AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
+          AXIOM_GIT_COMMIT: ${{ github.sha }}
+          AXIOM_STAGING_DIR: ${{ runner.temp }}/axiom-raw-staging
+          AXIOM_DISABLE_TRACKING: "1"
+        run: |
+          uv run axiom pull yahoo-events \
+            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }} \
+            ${{ inputs.as_of && format('--as-of {0}', inputs.as_of) || '' }} \
+            ${{ inputs.dry_run && format('--dest {0}/raw-dryrun', runner.temp) || '' }}

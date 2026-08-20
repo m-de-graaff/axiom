@@ -660,6 +660,93 @@ def raw_stats(
         typer.echo(f"wrote {out}")
 
 
+@pull_app.command("yahoo-events")
+def pull_yahoo_events(
+    tickers: Annotated[
+        str, typer.Option("--tickers", help="Ticker list YAML, or a packaged config name.")
+    ] = "yahoo_events_v1",
+    limit: Annotated[
+        int | None, typer.Option("--limit", help="Smoke runs only. Tickers, in file order.")
+    ] = None,
+    as_of: Annotated[
+        str | None, typer.Option("--as-of", help="Pin the run's date, YYYY-MM-DD.")
+    ] = None,
+    dest: Annotated[
+        Path | None, typer.Option("--dest", help="Write to a directory instead of the Hub.")
+    ] = None,
+    run_id: Annotated[str | None, typer.Option("--run-id")] = None,
+    force: Annotated[bool, typer.Option("--force")] = False,
+) -> None:
+    """Capture split and dividend events for the pinned cross-check population.
+
+    Non-load-bearing by design. Yahoo has no licence and an active habit of refusing datacenter
+    IPs, so partial success is success and total failure is a dated line in the audit report
+    rather than a blocker (ADR-0016). Paced to at most 300 requests an hour with jitter.
+    """
+    from datetime import UTC, datetime
+
+    from axiom.sources.yahoo_events import blocked_report, load_tickers, pull_events
+
+    setup_logging()
+    pinned = load_tickers(tickers)
+    if limit is not None:
+        pinned = pinned[:limit]
+    stamp = as_of or datetime.now(UTC).date().isoformat()
+    pull_run_id = run_id or f"yahoo-{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
+
+    run = pull_events(pinned, _raw_store(dest), pull_run_id=pull_run_id, as_of=stamp, force=force)
+
+    typer.echo(f"{pull_run_id}: {run.line()} of {len(pinned)} ticker(s), as_of={stamp}")
+    for failure in run.failures[:10]:
+        typer.echo(f"  FAIL {failure.symbol}: {failure.error}")
+    if run.ok == 0 and run.failed:
+        # Not an error exit. "Yahoo said no" is a documented outcome of this phase, and failing
+        # the command would make a green pipeline impossible for a reason nobody can fix.
+        typer.echo("")
+        typer.echo(blocked_report(run, as_of=stamp))
+
+
+@raw_app.command("crosscheck-equities")
+def raw_crosscheck_equities(
+    sample: Annotated[int, typer.Option("--sample", help="Tickers to compare.")] = 25,
+    seed: Annotated[int, typer.Option("--seed")] = 1337,
+    years: Annotated[int, typer.Option("--years", help="Lookback window.")] = 2,
+    dest: Annotated[Path | None, typer.Option("--dest", help="Read a local tier instead.")] = None,
+    out: Annotated[
+        Path | None, typer.Option("--out", help="Write the markdown section here.")
+    ] = None,
+) -> None:
+    """Compare stored Stooq closes against Yahoo's adjusted closes on a sample of tickers.
+
+    The output is a number and its interpretation, not a pass or fail. Two vendors differing by
+    a fraction of a percent over two years is normal; one ticker differing by forty percent means
+    a corporate action only one of them applied, and that is the finding.
+    """
+    from datetime import UTC, datetime
+
+    from axiom.raw.crosscheck import crosscheck_equities, crosscheck_markdown
+    from axiom.sources.yahoo_events import live_price_fetcher
+
+    setup_logging()
+    store = _raw_store(dest)
+    manifests = store.list_manifests()
+    if not any(m.source == "stooq" for m in manifests):
+        typer.echo("no Stooq series in the raw tier; nothing to cross-check", err=True)
+        raise typer.Exit(2)
+
+    results = crosscheck_equities(
+        store, manifests, live_price_fetcher(), sample=sample, years=years, seed=seed
+    )
+    for result in results:
+        typer.echo(result.line())
+
+    section = crosscheck_markdown(results, as_of=datetime.now(UTC).date().isoformat())
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(section, encoding="utf-8")
+        typer.echo(f"wrote {out}")
+
+
 @registry_app.command("build")
 def registry_build(
     dest: Annotated[

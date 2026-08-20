@@ -23,7 +23,7 @@ kaggle = ["kaggle>=1.6"]
 # Source clients the cloud pull jobs need. Not installed on the laptop or in CI: the offline
 # tests drive every loader through a synthetic fetcher, so a broker client in CI would buy
 # nothing but a network dependency in a suite that must not have one.
-data = ["dukascopy-python>=4.0.1", "pandas>=2.2"]
+data = ["dukascopy-python>=4.0.1", "pandas>=2.2", "yfinance>=0.2.50"]
 # `axiom registry query` only. The canned reports are group-bys over a few thousand rows and run
 # on pyarrow alone; a SQL engine earns its place when the question is arbitrary.
 query = ["duckdb>=1.1"]

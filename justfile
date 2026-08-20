@@ -140,6 +140,19 @@ stooq-watch:
 stooq-log:
     gh run view $(gh run list --workflow=pull-stooq.yml --limit 1 --json databaseId -q '.[0].databaseId') --log
 
+# --- the v0.2 yfinance adjunct ---
+
+# Reachability smoke: twenty tickers, publishing nothing. Yahoo may simply refuse; that is data.
+yahoo-smoke limit="20":
+    gh workflow run pull-yahoo.yml -f dry_run=true -f limit={{limit}}
+
+# Capture splits and dividends for the whole pinned list. Takes about two hours, paced.
+pull-yahoo *ARGS:
+    gh workflow run pull-yahoo.yml {{ARGS}}
+
+yahoo-watch:
+    gh run watch $(gh run list --workflow=pull-yahoo.yml --limit 1 --json databaseId -q '.[0].databaseId') --exit-status
+
 # --- the v0.2 corpus registry ---
 
 # Rebuild the registry over every sidecar in axiom-raw. Run after every pull.
