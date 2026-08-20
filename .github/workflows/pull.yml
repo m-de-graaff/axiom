@@ -81,4 +81,5 @@ jobs:
             --concurrency '${{ inputs.concurrency }}' \
             ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }} \
             ${{ inputs.symbols && format('--symbols {0}', inputs.symbols) || '' }} \
-            ${{ inputs.run_id && format('--run-id {0}', inputs.run_id) || '' }}             ${{ inputs.dry_run && format('--dest {0}/raw-dryrun', runner.temp) || '' }}
+            ${{ inputs.run_id && format('--run-id {0}', inputs.run_id) || '' }} \
+            ${{ inputs.dry_run && format('--dest {0}/raw-dryrun', runner.temp) || '' }}
