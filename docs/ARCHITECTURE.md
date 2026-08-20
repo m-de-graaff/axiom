@@ -1,0 +1,79 @@
+# Architecture
+
+Two stages. Stage 1 turns continuous OHLCV bars into discrete tokens. Stage 2 is a decoder-only
+transformer that autoregresses over those tokens. Everything else in this repo exists to get data
+to stage 1 and to judge what comes out of stage 2 honestly.
+
+```
+raw bars → clean → contract (schema_version=1) → BSQ tokenizer → MDS shards → AR decoder → sampled paths → eval
+   C2/C3     C4              C5                       C6            C7           C8            C10        C9
+```
+
+## Components and the version that delivers each
+
+| | Component | Delivered in | State |
+|---|---|---|---|
+| C1 | Repo, tooling, config and reproducibility core, dispatch loop | v0.0 | **Built** |
+| C2 | Data acquisition: Binance, Dukascopy, Stooq, yfinance | v0.1–v0.2 | Not started |
+| C3 | Storage: Parquet layout, provenance manifests, corpus registry | v0.1–v0.2 | Not started |
+| C4 | Cleaning: Kronos Algorithm 1, Table 4 thresholds, split/dividend policy | v0.3 | Not started |
+| C5 | Preprocessing contract: candle geometry, causal normalization, golden vectors | v0.4 | Not started |
+| C6 | Tokenizer: BSQ default, flat FSQ ablation, temporal firewall | v0.5 | Not started |
+| C7 | Pre-tokenization: uint16 token pairs, time features, conditioning IDs, MDS shards | v0.6 | Not started |
+| C8 | AR decoder: adapted Kronos, 25 M params, dual head, conditioning embeddings | v0.7 | Not started |
+| C9 | Evaluation: CRPS, PIT, RankIC, volatility vs GARCH, five baselines | v0.8 | Not started |
+| C10 | Export and inference: safetensors, Predictor, ROCm on the 7900 XTX | v0.9 | Not started |
+| C11 | Checkpoint, resume, and run manifests | v0.0 | **Built** |
+
+## What v0.0 built
+
+C1 and C11, and nothing else. No market data was touched and no GPU minutes were spent — both are
+hard non-goals of this version, not merely things that did not happen.
+
+| Module | Does |
+|---|---|
+| `axiom.config.settings` | Environment settings and the run config, with unknown keys rejected |
+| `axiom.config.hashing` | The config hash: the identity of an experiment, ignoring which run produced it |
+| `axiom.ops.seeding` | Seeding, and RNG capture/restore across a process boundary |
+| `axiom.ops.checkpoint` | Atomic local checkpoint write, sha256-verified read, keep-last-K pruning |
+| `axiom.ops.hub` | Push to and pull from the private `axiom-runs` dataset, with `latest.json` as the resume pointer |
+| `axiom.ops.logx` | Logging, run provenance, and best-effort trackio |
+| `axiom.loop.dummy_trainer` | A stand-in trainer that exercises all of the above |
+| `axiom.cli` | One entry point every backend calls identically |
+
+**The design rule that makes v0.0 worth doing:** the loop code may not know it is a dummy. What
+v0.5 and v0.7 replace is `_step` and the payload inside `TrainState`. The checkpoint writer, the
+resume path, the config-hash guard, and both dispatch backends are used unchanged.
+
+## The three seams that later versions plug into
+
+**`TrainState`** (`axiom/ops/checkpoint.py`) is the unit of resumability. v0.0 stores a scalar
+where v0.7 stores model and optimizer tensors. Everything around it — atomic write, hash
+verification, pruning, Hub transport — is agnostic to what is inside.
+
+**`_step`** (`axiom/loop/dummy_trainer.py`) is the only function that knows what training means.
+
+**`schema_version`** appears on both the config and the checkpoint. It is 0 through v0.3 and
+freezes at 1 in v0.4 when the preprocessing contract is locked (ADR-0005). A checkpoint carrying
+a different `schema_version` than the running code is a refusal, not a warning.
+
+## Guards that already exist
+
+These are cheap now and expensive to retrofit:
+
+- **Config-hash mismatch on resume is fatal.** Resuming a different experiment into an existing
+  run would blend two things and report one number.
+- **Checkpoint sha256 is verified on every read.** A truncated upload resuming into garbage is
+  the one failure that would not announce itself.
+- **Atomic writes.** A kernel killed mid-write leaves the previous checkpoint or a complete new
+  one, never a half file.
+- **Tracking failures never take the run down.** A 12-hour session lost to an unreachable metrics
+  endpoint is 12 hours of quota gone.
+
+## Where the honest numbers come from
+
+Every run logs its config hash, git commit, package version, Python and torch versions, and
+backend tag before the first step (`axiom.ops.logx.run_provenance`). From v0.5 the run manifest
+also carries the tokenizer version and firewall date, and from v0.6 the data snapshot manifest.
+That chain is what makes any number in the eventual model card reproducible from a git tag rather
+than from memory.
