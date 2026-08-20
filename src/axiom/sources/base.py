@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -62,6 +63,17 @@ from axiom.schema.bars import (
 )
 
 log = logging.getLogger("axiom.pull")
+
+
+def _kill_after_items() -> int | None:
+    """Fault injection for the kill drill, mirroring the v0.0 loop's `AXIOM_KILL_AT_STEP`.
+
+    A pull's resume story is only worth as much as the drill that tested it, and on a backend
+    with no scriptable cancel -- a Kaggle kernel -- there is otherwise no way to kill a run
+    mid-flight from a script.
+    """
+    raw = os.environ.get("AXIOM_KILL_AFTER_ITEMS")
+    return int(raw) if raw else None
 
 
 def loader_version() -> str:
@@ -361,6 +373,7 @@ def run_pull(
     polite.
     """
     run = PullRun(manifest)
+    kill_after = _kill_after_items()
     for index, item in enumerate(items, start=1):
         log.info("[%d/%d] %s", index, len(items), item)
         run.record(
@@ -373,5 +386,11 @@ def run_pull(
                 force=force,
             )
         )
+        if kill_after is not None and index >= kill_after:
+            # `os._exit`, not an exception: a real session death does not unwind, does not flush
+            # the store's pending batch, and does not write a run manifest. Simulating it with
+            # anything gentler would test a kinder failure than the one that actually happens.
+            log.warning("AXIOM_KILL_AFTER_ITEMS=%d reached; dying without flushing", kill_after)
+            os._exit(137)
     store.flush()
     return run
