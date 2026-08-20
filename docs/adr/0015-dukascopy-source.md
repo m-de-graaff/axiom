@@ -134,11 +134,34 @@ few hundred megabytes. That is a fifth of what the crypto tier holds and it is t
 history before 2017, so it carries disproportionate weight in anything that asks the model about a
 regime crypto never saw.
 
-The reachability question ADR-0013 would have raised is answered for the laptop: 27 instruments
-fetched full-history without a block or a throttle. Whether the GitHub Actions runner IPs are
-treated the same is a separate fact, verified by the Phase C smoke before the full pull runs. If
-they are blocked, the fallback ladder is a Kaggle CPU kernel as the pull backend, then reduced
-concurrency with backoff — recorded in `docs/RUNBOOK.md`.
+### Reachability, measured (2026-08-20)
+
+The fallback ladder was not hypothetical. Three hosts were asked directly, and they disagree:
+
+| Host | Egress | `freeserv.dukascopy.com` | Full fetch |
+|---|---|---|---|
+| Laptop | Residential | 200 | 27 instruments, full history |
+| GitHub Actions runner | Azure (`74.235.127.166`) | **403, 0 bytes** | 0 bars across 24 years |
+| Kaggle CPU kernel | GCP (`34.80.255.184`) | 429 on a bare request | **315 daily bars for 2024** |
+
+**So the Dukascopy pull runs on Kaggle, not on GitHub Actions.** This is the ladder's first rung
+firing exactly as written, not a new decision -- but it does mean ADR-0013's "the data jobs run on
+Actions" now holds for Binance and Stooq and not for this source.
+
+Two details worth keeping, because both would otherwise be re-learned the hard way:
+
+The endpoint the client reads is `freeserv.dukascopy.com/2.0/index.php`, a JSON chart service --
+**not** the static `.bi5` datafeed. That is why the block bites: a CDN serving flat files has no
+reason to fingerprint callers, and an interactive chart backend does.
+
+A bare `curl` of that endpoint from Kaggle returns 429 while `dukascopy-python`'s own request path
+returns data from the same host seconds later. The library gets through where a naive request does
+not, so **the raw endpoint's status code is not a reliable proxy for whether the pull will work.**
+The probe kernel checks both for that reason, and its verdict line is the fetch, not the curl.
+
+Rung two of the ladder -- reduced concurrency with backoff -- was not needed and is not tuned. It
+would not have helped anyway: Actions returns 403 on the very first request, which is a refusal to
+serve this host rather than a complaint about how often it asks.
 
 The corpus now contains one asset class whose volume column means something different from every
 other asset class's. `volume_convention` is the field that keeps that recoverable, and v0.4 owns
