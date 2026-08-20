@@ -185,20 +185,31 @@ def test_a_total_block_stops_early_rather_than_grinding(tmp_path):
     assert len(run.results) == 25
 
 
-def test_a_run_that_lands_anything_keeps_going_despite_failures(tmp_path):
-    """Partial success is success; the early stop must only fire on a total block."""
-    tickers = [Ticker("AAPL", "AAPL")] + [Ticker(f"T{i}", f"T{i}") for i in range(60)]
+def test_interspersed_failures_never_trip_the_early_stop(tmp_path):
+    """Partial success is success.
+
+    The counter is consecutive, so a source that fails every other ticker is unreliable rather
+    than blocked, and the run walks the whole list. An earlier version of this test asserted the
+    run continued through *sixty consecutive* failures — that rule was wrong and the v0.2 Hub
+    incident is what showed it: a backend can start refusing partway, and grinding on afterwards
+    buys nothing.
+    """
+    tickers = [Ticker(f"T{i}", f"T{i}") for i in range(60)]
+    reachable = {f"T{i}": [] for i in range(0, 60, 2)}
+
     run = pull_events(
         tickers,
         LocalRawStore(tmp_path),
         pull_run_id="yahoo-1",
         as_of=AS_OF,
-        fetch=fetcher({"AAPL": []}),
+        fetch=fetcher(reachable),
         limiter=nowait(),
         fail_fast_after=25,
     )
-    assert run.ok == 1
-    assert run.failed == 60
+
+    assert run.ok == 30
+    assert run.failed == 30
+    assert len(run.results) == 60, "every ticker was attempted"
 
 
 def test_the_blocked_report_is_dated_and_names_the_reason():
@@ -252,3 +263,80 @@ def test_a_probe_with_no_bars_on_one_side_says_so_rather_than_guessing():
     verdict = detect_split_discontinuity([split + DAY_MS], [125.0], split, 4.0)
     assert verdict["adjusted"] is None
     assert "no bars" in verdict["reason"]
+
+
+# --- the blast wall ---------------------------------------------------------------------------
+
+
+class ExplodingStore(LocalRawStore):
+    """A store that fails the way the Hub does: on the commit, mid-run, transiently."""
+
+    def __init__(self, root, *, fail_on: set[str] | None = None, fail_reads: bool = False) -> None:
+        super().__init__(root)
+        self.fail_on = fail_on or set()
+        self.fail_reads = fail_reads
+
+    def read_sidecar(self, artifact_path: str):
+        if self.fail_reads:
+            raise RuntimeError("429 Client Error: Too Many Requests")
+        return super().read_sidecar(artifact_path)
+
+    def put(self, artifact_path: str, data: bytes, manifest) -> None:
+        if any(symbol in artifact_path for symbol in self.fail_on):
+            raise RuntimeError("429 Client Error: Too Many Requests")
+        super().put(artifact_path, data, manifest)
+
+
+def test_a_hub_error_on_put_fails_one_ticker_not_the_run(tmp_path):
+    """The v0.2 incident: a 429 on upload_folder killed a 503-ticker run mid-flight."""
+    store = ExplodingStore(tmp_path, fail_on={"MSFT"})
+    tickers = [Ticker("AAPL", "AAPL"), Ticker("MSFT", "MSFT"), Ticker("NVDA", "NVDA")]
+
+    run = pull_events(
+        tickers,
+        store,
+        pull_run_id="yahoo-1",
+        as_of=AS_OF,
+        fetch=fetcher({"AAPL": [], "MSFT": [], "NVDA": []}),
+        limiter=nowait(),
+    )
+
+    assert run.ok == 2
+    assert run.failed == 1
+    assert run.failures[0].symbol == "MSFT"
+    assert "429" in run.failures[0].error
+
+
+def test_a_hub_error_on_read_fails_one_ticker_not_the_run(tmp_path):
+    """The resume read is a Hub call too, and it was catching only ValueError."""
+    store = ExplodingStore(tmp_path, fail_reads=True)
+    run = pull_events(
+        [Ticker("AAPL", "AAPL")],
+        store,
+        pull_run_id="yahoo-1",
+        as_of=AS_OF,
+        fetch=fetcher({"AAPL": []}),
+        limiter=nowait(),
+    )
+    assert run.failed == 1
+    assert run.ok == 0
+
+
+def test_a_mid_run_block_stops_rather_than_grinding(tmp_path):
+    """Once the backend starts refusing, the remaining tickers are not worth 12 seconds each."""
+    tickers = [Ticker(f"T{i}", f"T{i}") for i in range(200)]
+    fetchable = {f"T{i}": [] for i in range(200)}
+    store = ExplodingStore(tmp_path, fail_on={f"T{i}" for i in range(10, 200)})
+
+    run = pull_events(
+        tickers,
+        store,
+        pull_run_id="yahoo-1",
+        as_of=AS_OF,
+        fetch=fetcher(fetchable),
+        limiter=nowait(),
+        fail_fast_after=25,
+    )
+
+    assert run.ok == 10, "the tickers before the block must still land"
+    assert run.failed == 25, "and it must stop 25 consecutive failures in, not grind through 190"

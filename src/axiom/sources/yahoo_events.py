@@ -236,18 +236,37 @@ def pull_ticker(
     digest = sha256_bytes(f"yahoo://{ticker.yahoo_symbol}/actions#{as_of}".encode())
 
     try:
+        return _pull_ticker(ticker, store, fetch, path, digest, pull_run_id, force=force)
+    except Exception as exc:  # one bad ticker must not end a five-hundred-ticker run
+        log.warning("failed %s: %s: %s", ticker.symbol, type(exc).__name__, exc)
+        return EventResult(ticker.symbol, "failed", error=f"{type(exc).__name__}: {exc}")
+
+
+def _pull_ticker(
+    ticker: Ticker,
+    store: RawStore,
+    fetch: EventFetcher,
+    path: str,
+    digest: str,
+    pull_run_id: str,
+    *,
+    force: bool,
+) -> EventResult:
+    """The body of :func:`pull_ticker`, so the blast wall around it can cover all of it.
+
+    Every line here can fail, and two of the ways are not the fetch. `read_sidecar` and `put` are
+    both calls to the Hub, and the Hub rate-limits: a 429 on the commit ended a 503-ticker run
+    that had already landed 125 of them. `base.pull_item` never had that problem because it wraps
+    its whole body; this function exists so this one does too.
+    """
+    try:
         remote = store.read_sidecar(path)
-    except ValueError:
+    except ValueError:  # a tampered sidecar is absent, not fatal -- re-pulling heals it
         remote = None
     if not force and remote is not None and remote.source_sha256s == [digest]:
         return EventResult(ticker.symbol, "skipped")
 
-    try:
-        table = events_table(fetch(ticker.yahoo_symbol))
-    except Exception as exc:  # one blocked ticker must not end a five-hundred-ticker run
-        log.warning("failed %s: %s: %s", ticker.symbol, type(exc).__name__, exc)
-        return EventResult(ticker.symbol, "failed", error=f"{type(exc).__name__}: {exc}")
-
+    table = events_table(fetch(ticker.yahoo_symbol))
     ts = table["ts"].to_pylist()
     manifest = FileManifest(
         schema_version=1,
@@ -308,13 +327,15 @@ def pull_events(
 ) -> EventRun:
     """Walk the pinned list, paced, tolerating failures.
 
-    ``fail_fast_after`` stops a run whose first N tickers all failed. That is what a block looks
-    like, and grinding through four hundred more requests at one every twelve seconds to
-    rediscover it would take ninety minutes and annoy an endpoint that has already said no.
+    ``fail_fast_after`` stops the run after that many *consecutive* failures. That is what a
+    block looks like, and grinding through four hundred more requests at one every twelve seconds
+    to rediscover it would take ninety minutes and annoy a backend that has already said no.
+    Consecutive rather than total: a block can start partway through, and it did.
     """
     fetch = fetch or live_fetcher()
     limiter = limiter or RateLimiter()
     run = EventRun()
+    consecutive = 0
 
     for index, ticker in enumerate(tickers, start=1):
         result = pull_ticker(
@@ -323,11 +344,16 @@ def pull_events(
         run.record(result)
         log.info("[%d/%d] %s: %s", index, len(tickers), ticker.symbol, result.status)
 
-        if run.failed >= fail_fast_after and run.ok == 0:
+        consecutive = consecutive + 1 if result.status == "failed" else 0
+        if consecutive >= fail_fast_after:
+            # Counted consecutively rather than in total, because a backend can start refusing
+            # *partway*: the run that prompted this had landed 125 tickers before the Hub began
+            # returning 429, and a total-with-nothing-landed rule would have ground through the
+            # remaining 380 at twelve seconds each to learn what the first 25 already said.
             log.error(
-                "%d consecutive failures with nothing landed; stopping. This is what a block "
-                "looks like, and it is a documented outcome rather than a bug (ADR-0016)",
-                run.failed,
+                "%d consecutive failures; stopping. This is what a block looks like, and it is a "
+                "documented outcome rather than a bug (ADR-0016)",
+                consecutive,
             )
             break
         if result.status != "skipped":
