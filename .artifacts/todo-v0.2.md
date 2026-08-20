@@ -50,6 +50,27 @@
 
 ---
 
+## Status as of 2026-08-21
+
+**Built and tested offline (324 tests green):** Phases A, B, C, D, E, F1, F2 — every ADR, the
+source framework, all three loaders, the yfinance adjunct, the corpus registry, and the equities
+universe builder. ADR numbers are 0014–0016; the plan's 0012–0014 were taken.
+
+**Backends, measured rather than assumed:** Binance and Stooq run on GitHub Actions. Dukascopy
+runs on Kaggle, because the feed returns 403 to Actions runner IPs and answers a Kaggle kernel
+(ADR-0015 records all three hosts).
+
+**Blocked on a human, both browser-only actions:**
+- Kaggle scopes secrets per kernel, so `axiom-pull-dukascopy` needs `GH_PAT` and `HF_TOKEN`
+  attached in the UI before it can run. No API equivalent.
+- A fresh Stooq archive URL. The first one 404'd from both a runner and the laptop minutes after
+  it was issued — expired or single-use, not IP-bound, so the handoff design stands and the
+  ADR-0016 staging fallback is not what this needs.
+
+**Not yet run, because they need the data the two blocks above provide:** the Dukascopy full pull
+and kill drill, the Stooq ingestion, D3's adjustment audit, F3's M0 assembly check, and all of
+Phase G.
+
 ## Phase C — Dukascopy loader (budget: 1.5–2 days)
 
 ### C1. Reachability smoke (do this first — carried unverified)
