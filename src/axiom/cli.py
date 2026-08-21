@@ -570,12 +570,25 @@ def pull_stooq(
     if final.failures[20:]:
         typer.echo(f"  ... and {len(final.failures) - 20} more")
 
-    # ADR-0016 fails the run above a parse-failure rate of 0.1% of files, not on any one file.
+    # Two kinds of failure, and only one of them is a parse failure.
+    #
+    # ADR-0016's 0.1% tolerance is about text this loader could not read. A ticker rejected by
+    # `validate_bars` parsed perfectly: the vendor published a bar with `high < low`, which is not
+    # something a market did, and ADR-0010 refuses it rather than repairing it. Gating on the two
+    # together would fail a run over the vendor's data quality and call it a parser problem.
     attempted = final.ok + final.failed
-    rate = final.failed / attempted if attempted else 0.0
-    typer.echo(f"parse-failure rate: {rate:.3%} of {attempted} files")
-    if rate > 0.001:
-        typer.echo("over the 0.1% tolerance", err=True)
+    unreadable = [f for f in final.failures if "MalformedFile" in f.error]
+    impossible = [f for f in final.failures if f not in unreadable]
+
+    parse_rate = len(unreadable) / attempted if attempted else 0.0
+    typer.echo(f"parse-failure rate: {parse_rate:.3%} of {attempted} files")
+    typer.echo(
+        f"rejected on invariants: {len(impossible)} file(s) "
+        f"({len(impossible) / attempted if attempted else 0.0:.3%}) — the vendor published bars "
+        "that cannot be true; they are absent from the tier and listed above"
+    )
+    if parse_rate > 0.001:
+        typer.echo("parse-failure rate is over the 0.1% tolerance", err=True)
         raise typer.Exit(1)
 
 
