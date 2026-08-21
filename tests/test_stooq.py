@@ -199,7 +199,9 @@ def test_the_archive_lands_as_parquet(tmp_path, archive):
     assert landed is not None
     assert landed.volume_convention == "shares"
     assert landed.amount_synthesized is True
-    assert landed.adjustment_policy == "vendor_adjusted_unverified"
+    # The audit's measured finding (ADR-0016), not a guess: the placeholder it replaced stayed
+    # in place until three split probes and a 20-ticker cross-check had actually been run.
+    assert landed.adjustment_policy == "split_and_dividend_adjusted"
     assert landed.source_symbol == "aapl.us"
 
 
