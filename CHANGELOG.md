@@ -28,10 +28,14 @@ the laptop within minutes — expired, not IP-bound, which matters because only 
 what the laptop staging exception exists for. Yahoo, expected to block datacenter IPs, answered
 503 of 503 tickets with zero failures.
 
-The adjustment audit returned **`split_adjusted`**: AAPL, NVDA and TSLA show close ratios of
-0.9672, 0.9926 and 1.0035 across splits of 4:1, 10:1 and 3:1. That half of the audit needs only
-the stored bars and a calendar, which is why it produced an answer on a day when the Hub was
-rate-limiting reads.
+The adjustment audit returned **`split_and_dividend_adjusted`**. AAPL, NVDA and TSLA show close
+ratios of 0.9672, 0.9926 and 1.0035 across splits of 4:1, 10:1 and 3:1, and across 20 sampled
+tickers the median relative difference against Yahoo's dividend-adjusted closes is 0.0129. Stooq's
+closes track a total-return path.
+
+That inverts a v0.3 assumption: the plan expected to *build* a total-return series for eval labels
+from a price path, and the measurement says the tokenization series is the one that has to be
+derived instead.
 
 Every v0.1 sidecar was re-read by v0.2 code and still verified its own recorded hash.
 
