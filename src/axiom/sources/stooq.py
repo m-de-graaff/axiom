@@ -334,8 +334,11 @@ class StooqSource:
             "price_side": "trade",
             "volume_convention": "shares",
             "amount_synthesized": True,
-            # Replaced by the audit's finding. A guess dressed as a recorded fact is worse than
-            # an admitted unknown, so the placeholder says out loud that nobody has checked.
-            "adjustment_policy": "vendor_adjusted_unverified",
+            # The audit's finding, measured 2026-08-21 and recorded in
+            # `docs/reports/v0.2-adjustment-audit.md`: three known splits show no discontinuity,
+            # and 20 sampled tickers track Yahoo's dividend-adjusted closes to a median 1.29%.
+            # This started as `vendor_adjusted_unverified` and stayed there until it was checked,
+            # which is the only reason the value can be trusted now.
+            "adjustment_policy": "split_and_dividend_adjusted",
             "redistribution_class": "loader_manifest_private_cache",
         }

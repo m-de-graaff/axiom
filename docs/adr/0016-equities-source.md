@@ -139,6 +139,23 @@ policy has to do, and the vendor does not document it. So it is measured:
 The verdict goes in `docs/reports/v0.2-adjustment-audit.md` and the `adjustment_policy` field is
 regenerated for `raw/stooq/**` only.
 
+### The verdict, measured 2026-08-21
+
+**`split_and_dividend_adjusted`.** The split probes came back at close ratios of 0.9672 (AAPL,
+4:1), 0.9926 (NVDA, 10:1) and 1.0035 (TSLA, 3:1) — all near 1, none near the split. And across 20
+sampled tickers the median relative difference against Yahoo's `auto_adjust=True` closes is
+**0.0129**, inside the 2 % agreement threshold. Stooq's closes track a total-return path.
+
+This inverts what the roadmap assumed for v0.3. That plan reads "split-adjusted OHLC for
+tokenization; separate total-return series for eval labels", which presumes the vendor supplies a
+price path and that total return must be constructed. It is the other way round: **the
+tokenization series is the one that has to be derived**, by removing dividends using the events
+captured in `raw/yahoo/adjustments/`.
+
+Starting v0.3 from the assumption would have added dividends to a series that already carried
+them, and the error would have been invisible — a total-return series double-counting dividends
+still looks like a price series going up.
+
 ### Survivorship: accepted and documented
 
 Stooq's bulk dump skews heavily toward currently-listed tickers. Companies that went bankrupt or
