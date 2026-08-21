@@ -1214,8 +1214,9 @@ def _bar_reader(store, dest: Path | None, refs, *, snapshot: bool, concurrency: 
         from huggingface_hub import snapshot_download
 
         from axiom.config.settings import AxiomSettings
-        from axiom.raw.store import retry
+        from axiom.raw.store import retry, set_hub_timeouts
 
+        set_hub_timeouts()
         settings = AxiomSettings()
         typer.echo(f"snapshotting {len(refs)} artifact(s) from {settings.raw_repo_id}...")
         # The Hub rate-limits a burst of thirteen thousand requests however few workers make

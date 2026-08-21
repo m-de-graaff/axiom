@@ -21,6 +21,30 @@ from axiom.provenance.manifest import SIDECAR_SUFFIX, FileManifest
 
 log = logging.getLogger("axiom.raw")
 
+#: Hub HTTP timeouts, in seconds, applied when the caller has not set them.
+#:
+#: `huggingface_hub` defaults to ten seconds, which is fine for a handful of files and not fine
+#: for thirteen thousand: a registry build lost 19 sidecars to `ReadTimeout` and then failed
+#: outright when every retry round died early on one slow read. The Hub is not slow, it is
+#: rate-shaping, and waiting is the correct response to that.
+HF_TIMEOUT_ENV: dict[str, str] = {
+    "HF_HUB_DOWNLOAD_TIMEOUT": "120",
+    "HF_HUB_ETAG_TIMEOUT": "60",
+}
+
+
+def set_hub_timeouts() -> None:
+    """Widen the Hub HTTP timeouts unless the environment already says otherwise.
+
+    Called by the commands that read the whole tier. Explicit rather than an import-time side
+    effect, so a caller that wants the library defaults simply does not call it.
+    """
+    import os
+
+    for name, value in HF_TIMEOUT_ENV.items():
+        os.environ.setdefault(name, value)
+
+
 #: Files per Hub commit.
 #:
 #: The number that governs this is not throughput, it is **the Hub's limit of 128 commits per
@@ -39,13 +63,18 @@ log = logging.getLogger("axiom.raw")
 DEFAULT_BATCH = 2_000
 
 
-def retry(call, *, what: str, attempts: int = 8, base_delay: float = 30.0):
+def retry(call, *, what: str, attempts: int = 12, base_delay: float = 20.0):
     """Run ``call`` until it stops raising, backing off between tries.
 
     For work that makes progress even when it fails. A resumable download is exactly that: the
     attempt that hits a rate limit still leaves everything it fetched in the cache, so the next
     one has less to do. Retrying something that is *not* resumable this way would just be a
-    slower way to fail eight times.
+    slower way to fail twelve times.
+
+    Twelve attempts because `snapshot_download` abandons the whole batch on the first file that
+    times out, so a run of thirteen thousand small files needs more rounds than a run of a few
+    hundred. Raising :data:`HF_TIMEOUT_ENV` matters more than the count -- it is what stops each
+    round dying early.
     """
     import time
 
@@ -209,6 +238,7 @@ class HubRawStore:
         """
         from huggingface_hub import snapshot_download
 
+        set_hub_timeouts()
         root = Path(
             retry(
                 lambda: snapshot_download(

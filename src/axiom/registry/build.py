@@ -208,8 +208,9 @@ def build_registry(
     """
     from huggingface_hub import snapshot_download
 
-    from axiom.raw.store import retry
+    from axiom.raw.store import retry, set_hub_timeouts
 
+    set_hub_timeouts()
     root = Path(
         retry(
             lambda: snapshot_download(

@@ -8,6 +8,7 @@ it never quietly loses a row it could not read.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -311,3 +312,21 @@ def test_bad_sidecars_serialize_for_the_companion_file():
 def test_reports_survive_an_empty_registry(report):
     empty = build_from_manifests([], sizes={}).table
     assert report(empty) == []
+
+
+def test_hub_timeouts_are_widened_but_never_overridden(monkeypatch) -> None:
+    """Ten seconds is fine for a handful of files and not for thirteen thousand.
+
+    A registry build lost 19 sidecars to `ReadTimeout` and then failed outright when every retry
+    round died early on one slow read. But a caller who has already set a value means it.
+    """
+    from axiom.raw.store import HF_TIMEOUT_ENV, set_hub_timeouts
+
+    for name in HF_TIMEOUT_ENV:
+        monkeypatch.delenv(name, raising=False)
+    set_hub_timeouts()
+    assert all(os.environ[name] == value for name, value in HF_TIMEOUT_ENV.items())
+
+    monkeypatch.setenv("HF_HUB_DOWNLOAD_TIMEOUT", "5")
+    set_hub_timeouts()
+    assert os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] == "5"
