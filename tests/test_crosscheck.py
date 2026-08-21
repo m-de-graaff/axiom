@@ -74,3 +74,46 @@ def test_the_markdown_ranks_the_worst_ticker_first():
     large = compare_closes("ZZZ", path(200), {t: v / 4.0 for t, v in path(200).items()})
     text = crosscheck_markdown([small, large], as_of="2026-08-20")
     assert text.index("| ZZZ |") < text.index("| AAA |")
+
+
+def test_yahoo_is_asked_for_our_symbol_not_the_vendors_spelling():
+    """Stooq writes `aapl.us`; Yahoo 404s on it. Asking wrong looks like Yahoo being down."""
+    from axiom.raw.crosscheck import crosscheck_equities
+    from tests.test_registry import manifest
+
+    asked: list[str] = []
+
+    def fetcher(symbol, start, end):
+        asked.append(symbol)
+        return path(200)
+
+    class Store:
+        def get(self, artifact_path):
+            import io
+
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+
+            ts = sorted(path(200))
+            buf = io.BytesIO()
+            pq.write_table(
+                pa.table(
+                    {
+                        "ts": pa.array(ts, pa.int64()),
+                        "close": pa.array([100.0] * len(ts), pa.float64()),
+                    }
+                ),
+                buf,
+            )
+            return buf.getvalue()
+
+    m = manifest(
+        source="stooq",
+        market="us",
+        asset_class="equity",
+        symbol="AAPL",
+        frequency="1d",
+        source_symbol="aapl.us",
+    )
+    crosscheck_equities(Store(), [m], fetcher, sample=1, now=datetime(2024, 8, 1, tzinfo=UTC))
+    assert asked == ["AAPL"]

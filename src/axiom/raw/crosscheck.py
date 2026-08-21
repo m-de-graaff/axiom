@@ -135,7 +135,11 @@ def crosscheck_equities(
                     TickerComparison(symbol, "skipped", detail="no stored bars in the window")
                 )
                 continue
-            theirs = price_fetcher(manifest.source_symbol or symbol, since, now)
+            # `symbol`, not `source_symbol`. The latter is the *vendor's* spelling of the
+            # ticker -- Stooq writes `aapl.us` -- and asking Yahoo for `SMXT.US` returns a 404
+            # for every ticker in the sample, which reads as "Yahoo is down" rather than
+            # "we asked the wrong question".
+            theirs = price_fetcher(symbol, since, now)
             results.append(compare_closes(symbol, ours, theirs))
         except Exception as exc:
             log.warning("crosscheck failed for %s: %s", symbol, exc)
