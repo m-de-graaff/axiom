@@ -94,6 +94,19 @@ class CleanResult:
         return self.total_bars - self.kept_bars
 
 
+def segment_id(identity: SeriesIdentity, start_ts: int) -> str:
+    """A segment's unique name.
+
+    The plan called for ``{symbol}:{frequency}:{start_ts}``, and the corpus proved that is not
+    unique: Binance lists the same ticker on spot and on USDT-M futures, both at 1d, and the two
+    listings begin on the same day. Thirty-two ids collided on the first full run. Source and
+    market are what separate them, so both are in the id.
+    """
+    return ":".join(
+        (identity.source, identity.market, identity.symbol, identity.frequency, str(start_ts))
+    )
+
+
 def _check_invariants(spans: list[Span], total: int, kept: int) -> None:
     """The four things that must be true of any segment set, asserted rather than assumed.
 
@@ -142,7 +155,7 @@ def clean_series(bars: pa.Table, identity: SeriesIdentity, config: CleanConfig) 
     config_hash = config.config_hash
     segments = [
         {
-            "segment_id": f"{identity.symbol}:{identity.frequency}:{int(ts[s.start])}",
+            "segment_id": segment_id(identity, int(ts[s.start])),
             "source": identity.source,
             "market": identity.market,
             "asset_class": identity.asset_class,

@@ -8,6 +8,7 @@ with the engine about weekends by construction and prove nothing.
 from __future__ import annotations
 
 import ast
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -309,6 +310,19 @@ def test_config_hash_is_sensitive_to_every_threshold() -> None:
     assert CleanConfig.model_validate(payload).config_hash != base.config_hash
 
 
+def test_the_verified_flag_is_not_in_the_config_hash() -> None:
+    """It records confidence in a row, not what the row says.
+
+    Hashing it would mean that re-reading the 2H threshold against the paper invalidates every
+    1h and 1d segment in the corpus — a full recompute for a change that cannot have altered a
+    single cut.
+    """
+    base = load_clean_config("clean_v1")
+    payload = base.model_dump()
+    payload["frequencies"]["2h"]["verified"] = True
+    assert CleanConfig.model_validate(payload).config_hash == base.config_hash
+
+
 def test_unverified_table_4_rows_refuse_to_run() -> None:
     cfg = load_clean_config("clean_v1")
     for frequency in ("10m", "20m", "40m", "2h"):
@@ -438,6 +452,24 @@ def test_tables_build_and_pass_the_corpus_invariants() -> None:
     assert dropstats_table(drops).num_rows == 15
 
 
+def test_segment_ids_separate_the_same_ticker_on_two_markets() -> None:
+    """Binance lists ACEUSDT on spot and on USDT-M futures, and both begin the same day.
+
+    Thirty-two ids collided on the first full corpus run, because the id held only symbol,
+    frequency and start. Source and market are what tell the two listings apart.
+    """
+    series = synth.walk("1d", 300, seed=21)
+    cfg = config(**{"1d": 4})
+    ids = {
+        row["segment_id"]
+        for market in ("spot", "um")
+        for row in clean_series(
+            series.table, replace(identity(series, "ACEUSDT"), market=market), cfg
+        ).segments
+    }
+    assert len(ids) == 2, ids
+
+
 def test_corpus_invariants_catch_an_overlap() -> None:
     result = clean(synth.walk("1h", 300, seed=1), config(**{"1h": 4}))
     row = result.segments[0]
@@ -467,6 +499,7 @@ _ALLOWED_ROOTS = {
     "__future__",
     "ast",
     "collections",
+    "hashlib",
     "dataclasses",
     "functools",
     "itertools",

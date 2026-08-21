@@ -20,8 +20,8 @@ on:
         description: Clean only the first N artifacts. Empty means the whole corpus.
         default: ""
       concurrency:
-        description: Simultaneous artifact downloads.
-        default: "16"
+        description: Simultaneous artifact downloads. Above ~8 the Hub rate-limits.
+        default: "8"
       derive_tr:
         description: Also build the derived total-return tier (ADR-0019).
         type: boolean
@@ -54,6 +54,11 @@ jobs:
           AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
           AXIOM_GIT_COMMIT: ${{ github.sha }}
           AXIOM_DISABLE_TRACKING: "1"
+          # Xet mints a read token per request, and thirteen thousand of those in six minutes
+          # returns 429 from `/xet-read-token` however patiently the client backs off. The bar
+          # files are a few hundred kilobytes each, so Xet's dedup buys nothing here and the
+          # plain CDN resolve path does not have that endpoint in it at all.
+          HF_HUB_DISABLE_XET: "1"
         run: |
           uv run axiom clean run \
             --config clean_v1 \

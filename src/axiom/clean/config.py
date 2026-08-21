@@ -10,13 +10,14 @@ is what lets thresholds be tuned without a corpus rewrite.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from axiom.config.hashing import config_hash
+from axiom.config.hashing import SHORT_LEN, canonical_json
 from axiom.config.settings import resolve_config_path
 
 #: The five stages of Algorithm 1, in the only order this config is allowed to declare.
@@ -88,8 +89,19 @@ class CleanConfig(BaseModel):
 
     @property
     def config_hash(self) -> str:
-        """Content identity of the thresholds. Stamped into every segment row."""
-        return config_hash(self)
+        """Content identity of the **thresholds**. Stamped into every segment row.
+
+        ``verified`` is excluded, and only ``verified``. It records how much anybody trusts a
+        Table 4 row, not what the row says, and including it would mean that re-reading the 2H
+        threshold against the paper invalidates every 1h and 1d segment in the corpus — a full
+        recompute for a change that cannot have altered a single cut.
+        """
+        payload = self.model_dump(mode="json")
+        payload["frequencies"] = {
+            name: {k: v for k, v in rule.items() if k != "verified"}
+            for name, rule in payload["frequencies"].items()
+        }
+        return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:SHORT_LEN]
 
     def rule_for(self, frequency: str) -> FrequencyRule:
         """The Table 4 row for a frequency, refusing the ones nobody has checked.

@@ -1059,8 +1059,12 @@ def clean_run(
         int | None, typer.Option("--limit", help="Clean only the first N artifacts. Smoke runs.")
     ] = None,
     concurrency: Annotated[
-        int, typer.Option("--concurrency", help="Simultaneous artifact downloads.")
-    ] = 16,
+        int,
+        typer.Option(
+            "--concurrency",
+            help="Simultaneous artifact downloads. Above ~8 the Hub starts returning 429.",
+        ),
+    ] = 8,
 ) -> None:
     """Clean every bar artifact in the registry into one segment index.
 
