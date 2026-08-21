@@ -424,8 +424,16 @@ def _fan_out(grouped, read, work, concurrency: int, log=None):
 
     Threads rather than processes: every hot loop below is numpy, which drops the GIL, and a
     process pool would pay to pickle a bar table per artifact.
+
+    **Submission is bounded, and that is not a tuning detail.** Each result carries up to twelve
+    quantile sketches, which is about 6 MB. Submitting all ten thousand artifacts up front means
+    every completed result stays alive inside its `Future` until the consumer reaches it, and the
+    consumer cannot keep up with the pool — so the run climbs to tens of gigabytes and the runner
+    kills it, which is exactly what happened the first time this ran over the whole corpus. Keeping
+    a few times `concurrency` in flight and dropping each future as it is consumed holds the
+    footprint flat.
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
     def one(path, refs):
         data = read(path)
@@ -436,14 +444,28 @@ def _fan_out(grouped, read, work, concurrency: int, log=None):
         except Exception as exc:  # a bad file must not take the corpus down
             return path, None, f"{path}: {type(exc).__name__}: {exc}"
 
+    total = len(grouped)
+    in_flight = max(2, concurrency * 3)
     done = 0
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = [pool.submit(one, path, refs) for path, refs in grouped.items()]
-        for future in as_completed(futures):
+
+    def drain(finished):
+        nonlocal done
+        for future in finished:
             done += 1
             if log and done % 1000 == 0:
-                log(f"  {done}/{len(futures)} artifacts")
+                log(f"  {done}/{total} artifacts")
             yield future.result()
+
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        pending: set = set()
+        for path, refs in grouped.items():
+            pending.add(pool.submit(one, path, refs))
+            if len(pending) >= in_flight:
+                finished, pending = wait(pending, return_when=FIRST_COMPLETED)
+                yield from drain(finished)
+        while pending:
+            finished, pending = wait(pending, return_when=FIRST_COMPLETED)
+            yield from drain(finished)
 
 
 @dataclass

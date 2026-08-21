@@ -364,3 +364,36 @@ def test_the_snapshot_file_is_json_a_human_can_read() -> None:
 
     assert json.loads(text) == hashes
     assert all(len(digest) == 64 for digest in hashes.values())
+
+
+# --- fan-out bounding ----------------------------------------------------------------------
+
+
+def test_the_fan_out_does_not_queue_the_whole_corpus_before_yielding_anything() -> None:
+    """The regression test for a run the runner killed.
+
+    Each result carries about 6 MB of quantile sketches. Submitting ten thousand artifacts up
+    front keeps every completed result alive inside its `Future` until the consumer reaches it,
+    and the consumer never catches up — so the first corpus-wide fit climbed until it was killed,
+    with nothing in the log but a cancellation.
+    """
+    from axiom.contract.corpus import _fan_out
+
+    started: list[str] = []
+    grouped = {f"a{i}.parquet": [make_ref()] for i in range(500)}
+
+    generator = _fan_out(grouped, lambda path: started.append(path) or b"", lambda *_: None, 2)
+    next(generator)
+
+    assert len(started) < len(grouped)
+    generator.close()
+
+
+def test_the_fan_out_still_visits_every_artifact() -> None:
+    from axiom.contract.corpus import _fan_out
+
+    grouped = {f"a{i}.parquet": [make_ref()] for i in range(50)}
+
+    seen = [path for path, _, _ in _fan_out(grouped, lambda _: b"", lambda *_: None, 4)]
+
+    assert sorted(seen) == sorted(grouped)

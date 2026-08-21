@@ -116,9 +116,12 @@ in v0.3–v1.0 does, so it does not exist.
 Kronos's reported 12 billion. This project is roughly **three orders of magnitude smaller than the
 paper it adapts**, and no amount of care about cleaning changes that.
 
-What actually constrains training is smaller still. The usable-window count — `Σ max(0, n_bars −
-511)` over surviving segments — is the number v0.5 sizes against, and it is far below the bar
-count because short series contribute nothing:
+What actually constrains training is smaller still. The usable-window count — `Σ max(0, (n_bars −
+1) − 511)` over surviving segments — is the number v0.5 sizes against, and it is far below the bar
+count because short series contribute nothing. The `− 1` is the v0.4 anchor-bar rule: bar 0 of
+every segment is consumed to seed the gap feature and the first strictly-past median, so it
+produces no feature row and every segment yields one window fewer than the v0.3 report published
+(ADR-0020). The corrected table is in `docs/reports/v0.4-contract-qa.md`.
 
 - 1,384 of 12,425 Stooq series hold fewer than 128 bars and are dropped outright by `min_bars`.
 - 3,512 hold fewer than 512 and contribute **zero** context-512 windows even though their bars
@@ -132,7 +135,25 @@ forecastable target.
 
 ---
 
-## 5. Source-specific artifacts carried forward
+## 5. The contract scales per asset class, not per series
+
+The frozen affine constants are fitted per (asset class × frequency × feature) and committed
+(ADR-0020). One `scale` therefore covers every instrument in a class, and the volatility spread
+inside "crypto" spans a major and a dead pair that last traded in 2019.
+
+Three things absorb that, and none of them removes it: the ±5 clip, the quantizer range v0.5
+chooses, and the asset-class and frequency conditioning embeddings v0.7 adds. What is left is a
+representation that is coarser for the tails of a class than a per-series fit would be.
+
+**Per-series adaptive scaling is a named post-1.0 experiment, not an oversight.** It is rejected
+here because a per-series statistic is a per-series fit, and a fit at inference time is exactly
+what makes the training and inference distributions drift apart — the failure the whole contract
+exists to prevent. The measured cost is the clip rate per slice, published in
+`docs/reports/v0.4-contract-qa.md`.
+
+---
+
+## 6. Source-specific artifacts carried forward
 
 - **Off-grid Binance bars.** Stretches of hourly bars phase-shifted after an exchange restart —
   43 consecutive bars on spot BTCUSDT from 2018-02-09, each exactly one hour after the last but
@@ -151,7 +172,7 @@ forecastable target.
 
 ---
 
-## 6. Not yet measured
+## 7. Not yet measured
 
 Named here so their absence is a decision rather than an oversight.
 
