@@ -6,6 +6,106 @@ versioning with git tags.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-21
+
+The **cleaning pass**, delivered as metadata rather than as a corpus. Kronos Appendix B
+Algorithm 1, with every interpretive choice the paper leaves open pinned in ADR-0018 instead of
+buried in the code.
+
+**13,077 series · 27,905 segments · 38,758,930 of 42,308,244 bars kept (8.39 % dropped) · 0
+failed.** The usable number is smaller and it is the one that matters: **27,508,145 context-512
+windows**, which is what v0.5 sizes the tokenizer corpus against rather than an estimate.
+
+Raw Parquet was never rewritten. The whole output is three files under `clean/v1/` plus a
+coverage manifest under `derived/tr_close/`, so re-tuning a threshold costs a rerun over intervals
+instead of a copy of the corpus. Zero market-data bytes reached the laptop; every corpus run was
+a GitHub runner.
+
+### Added
+
+- **A segment index** (ADR-0018). Per series, the contiguous `[start_ts, end_ts]` spans that
+  survive, with the rule that ended each one, bound to the `raw_artifact_sha256` of the file they
+  came from and to the config hash that produced them. Downstream reads bars *through* it.
+- **Session-aware gap partitioning** — the adaptation Kronos glosses over. A missing bar is a
+  boundary only if the session did not expect it: a strict grid for crypto, a DST-tolerant weekend
+  for FX, a settlement break for commodity CFDs, the XNYS calendar for US equities. Nothing is
+  ever imputed.
+- **`axiom.testing.synth`**, fifteen generators with ground truth about where cuts belong, in
+  timestamp space so pathologies compose. Library code, not test helpers — v0.4's contract tests
+  and v0.8's leakage tripwires reuse it. It imports nothing from `axiom.clean`, and a test asserts
+  that by parsing the imports: a toolkit sharing the engine's calendar would agree about weekends
+  by construction.
+- **`axiom clean probe`**, which explains *why* a series fragmented. The drop statistics report an
+  instrument that lost everything to a thousand one-hour gaps identically to one that lost it to a
+  single decade-long hole. The probe reports gap sizes, which hour of the day the holes fall in,
+  and whether the dead bars sit inside the window where the market was shut. Both v0.3 definition
+  bugs were found with it.
+- **Post-clean views**: usable bars beside usable windows, per-rule drop rates, the top-20
+  most-cut list, and three red-flag checks. `docs/reports/v0.3-clean-qa.md` carries a written
+  investigation against every hit.
+- **`docs/LIMITATIONS.md`**, feeding the v0.9 model card.
+- **Total-return policy** (ADR-0019) behind one interface with both branches tested.
+
+### Verified
+
+**The audit inverted a v0.3 assumption and the plan followed the measurement.** Stooq is split
+*and* dividend adjusted, so `tr_close` is an identity for every source. The plan called for a
+letter-sharded Parquet tier; under the measured verdict that would have been twelve thousand
+byte-for-byte copies of a column already in the file beside it, which is the duplication the plan
+itself refuses for crypto. `axiom derive tr` writes a coverage manifest instead. Coverage is
+100 %.
+
+**Survivorship, quantified.** Across 12,425 Stooq series spanning 1962 to 2026, the earliest
+*last* bar anywhere in the tier is 2026-02-06, and **not one ticker stopped trading more than a
+year before the pull date**. The real market delists several percent of listings a year. The
+archive is not a sample of market history; it is a snapshot of the currently-listed market with
+each survivor's history extended backwards, and every equity number downstream is conditioned on
+surviving to 2026.
+
+### Fixed
+
+Five bugs, every one found by a real run against the real corpus, and none by a test written in
+advance.
+
+- **Segment ids were not unique.** Binance lists the same ticker on spot and on USDT-M futures,
+  both at 1d, beginning the same day: `ACEUSDT:1d:1702857600000` named two segments. Thirty-two
+  collided. The corpus-wide invariant check caught it and refused to upload rather than publishing
+  a table with duplicate keys.
+- **Commodity CFDs were declared `24x5`.** All six show thousands of gaps exactly one slot wide in
+  UTC hours 21 and 22, on every weekday — XAUUSD alone had 2,369. That is a settlement break, not
+  an outage. Undeclared, it cost **100 % of Brent, copper, natural gas and silver, and 54 % of
+  gold**. Fixed with a config override rather than a re-pull.
+- **Weekend padding was excised as an illiquid run.** 8,177 of EURUSD's 8,235 zero-volume bars sit
+  inside the weekend window. Excising them was right; *partitioning* there was not, because the
+  hole they leave is the weekend the session already expects — and the resulting 120-bar weeks
+  could not survive `min_bars = 256`. EURUSD lost 20.8 % of its history to it, USDJPY 21.4 %.
+  A stage-zero filter now removes them before any rule sees them, and it tests volume as well as
+  time: the weekend window is wider than any one DST regime, and deleting on the window alone
+  threw away real Friday-evening bars.
+- **Two of the three red-flag checks measured the wrong thing.** Major-series loss counted the
+  session filter as damage, flagging every FX instrument for the cleaner working correctly. The
+  weekend check could never fire, because the gap rule partitions and never drops a bar, so its
+  drop count is zero by construction.
+- **The corpus job kept being rate-limited off the Hub.** Thirteen thousand `hf_hub_download`
+  calls is twenty-six thousand requests and earns a 429 however few threads make them.
+  `snapshot_download` halves that and is resumable, so the retry that works wraps the whole
+  snapshot rather than each file — and the runner cache now saves on failure, because the runs
+  that most need their partial download kept are exactly the ones that did not finish.
+
+### Changed
+
+- **`axiom derive tr` reads the registry**, not every sidecar. The first version asked the store
+  for all 13,580 and was rate-limited for it; everything it needs is already a registry column.
+- **The adjustment verdict lives in code, pinned by ADR-0019**, not in the sidecars. All 12,425
+  Stooq sidecars still record `vendor_adjusted_unverified`, which is what the loader honestly
+  believed before the audit ran. Correcting them is a re-pull rather than an edit —
+  `adjustment_policy` is inside `manifest_sha256`, which is stamped into each Parquet — so both
+  values are kept and the command says when they differ.
+- **`exchange-calendars` pinned** `>=4.13,<5`, in the `data` and `dev` extras and a new
+  `calendars` one. NYSE holidays back to 1962, including Good Friday and the one-off closures, is
+  not something to hand-roll.
+
+
 ## [0.2.0] - 2026-08-21
 
 Corpus **M0 assembled**. The raw tier grew from one source to four: FX and commodities from

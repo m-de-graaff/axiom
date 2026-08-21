@@ -3,6 +3,83 @@
 One section per gate, written when the gate is passed. Each claim names the evidence, so a number
 in the eventual model card can be traced back to the run that produced it.
 
+## v0.3 "Clean" — exit checklist passed 2026-08-21
+
+**The gate:** roadmap §4/v0.3 — all cleaning tests green; per-rule drop statistics reported per
+source and frequency, and eyeballed sane.
+
+### Checklist
+
+| Item | Status | Evidence |
+|---|---|---|
+| Full edge-case suite green: splits, gaps, flash crash, limit-lock, DST, holidays, rollover, delisting, suspension, min-length | Pass | `tests/test_clean_engine.py`, 473 tests total across the suite |
+| Hypothesis invariants: non-overlap, full accounting, determinism, idempotence, config-hash sensitivity | Pass | `test_invariants_hold_over_random_compositions`, `test_cleaning_is_deterministic`, `test_cleaning_is_idempotent` |
+| Order-of-operations locked | Pass | `test_stage_order_changes_the_answer` — 11 dead bars split by an outage clean differently under either ordering |
+| Engine pure; no import-time network or IO | Pass | AST pass over every top-level import in `axiom/clean/`, driver exempt and named |
+| Toolkit independent of the engine | Pass | `test_synthetic_toolkit_shares_no_code_with_the_engine`, by parsing imports |
+| Segment index covers every bar artifact in the registry | Pass | 13,077 of 13,077; registry holds 13,580 rows, of which 503 are Yahoo event series and not bars |
+| Every segment bound to a `raw_artifact_sha256` | Pass | Column is non-nullable in `SEGMENTS_SCHEMA`; verified per artifact in `test_a_full_run_produces_three_files_that_read_back` |
+| Invariants verified corpus-wide, not only in tests | Pass | `verify_corpus_invariants` runs inside `write_outputs`, so no path can upload an index that overlaps itself. It fired for real: 32 duplicate segment ids, refused |
+| **Determinism at corpus scale** | Pass | Two independent full runs, `segments_hash` **474ebff75c51** both times (runs 32509742564 and 32513845062) |
+| Drop-stats report committed; every red flag investigated | Pass | `docs/reports/v0.3-clean-qa.md`; 3 hits, one written investigation each |
+| Top-20 most-cut inspected with a verdict each | Pass | All 20 are thin US equities; verdicts in the report |
+| Usable-bars / usable-windows tables exist | Pass | **27,508,145** context-512 windows from 38,758,930 usable bars |
+| TR tier built per the real verdict; arithmetic tested; coverage documented | Pass | 12,425/12,425 `tr_available` (100 %), 491 with captured corporate actions, 0 failed |
+| `LIMITATIONS.md` started with quantified biases | Pass | Survivorship measured: zero of 12,425 tickers stopped trading more than a year before the pull |
+| Staleness guard works | Pass | `test_a_changed_raw_file_is_detected_and_recleaned`; the config-hash refusal fired for real when the session filter changed the hash |
+| RUNBOOK rules written | Pass | `docs/RUNBOOK.md` §"The v0.3 cleaning pass" |
+| Zero market-data bytes on laptop or home PC | Pass | Every corpus run on a GitHub runner; the laptop read only the registry, the segment index and the drop stats, all of which are metadata |
+| Zero Kaggle GPU-hours; Modal spend < $5 | Pass | Kaggle never ran; Modal still behind the ADR-0009 gate, $0 |
+| Nothing public | Pass | `axiom-raw` private; `clean/` and `derived/` are inside it |
+
+### The numbers
+
+| | |
+|---|---|
+| Series cleaned | 13,077 |
+| Segments | 27,905 |
+| Bars in | 42,308,244 |
+| Bars kept | 38,758,930 (**91.61 %**) |
+| Context-512 windows | 27,508,145 |
+| Failures | 0 |
+| `clean_config_hash` | `98d62d99d8f6` |
+| `segments_hash` | `474ebff75c51` |
+| Wall time | ~26 min clean, ~20 min snapshot |
+
+### Deviations from the v0.3 plan
+
+1. **ADRs are 0018 and 0019**, not 0015/0016 — those numbers were taken by v0.2.
+2. **The clean config lives in `src/axiom/configs/`**, where every other config lives; there is no
+   top-level `configs/`.
+3. **The TR tier is a coverage manifest, not Parquet.** The audit measured
+   `split_and_dividend_adjusted`, so `tr_close` is an identity for every source and the planned
+   letter-sharded tier would have been twelve thousand copies of a column already in the file
+   beside it — the duplication the plan itself refuses for crypto. Both branches are implemented
+   and tested; a re-audit flips it without a rewrite.
+4. **A sixth stage.** The plan named five. `session_filter` was added after the first full corpus
+   run measured what happens without it: Dukascopy's synthetic weekend padding was excised as an
+   illiquid run, partitioning every padded weekend and costing EURUSD 20.8 % of its history. See
+   ADR-0018 *Amendments*.
+5. **A new session, `24x5-cfd`.** v0.2 stamped every Dukascopy artifact `24x5`; the commodity CFDs
+   have a daily settlement break, and undeclared it cost 100 % of Brent, copper, natural gas and
+   silver. Fixed with a config override rather than a re-pull.
+6. **Segment ids carry source and market.** The plan's `symbol:frequency:start_ts` collided 32
+   times — Binance lists the same ticker on spot and USDT-M futures, both at 1d, starting the same
+   day.
+7. **Two of the three red-flag checks were rewritten** to measure what they meant. See the report.
+8. **Modal is still not the backend.** GitHub Actions ran every corpus job; `remote/modal/clean_run.py`
+   exists and runs the identical CLI when the ADR-0009 account gate clears.
+
+### What the corpus run found that no test would have
+
+Every one of the five bugs fixed in v0.3 came from a real run, not from a test written in advance:
+duplicate segment ids, the undeclared CFD break, the weekend-padding partition, two red-flag
+checks measuring the wrong thing, and the Hub rate-limiting a 26,000-request burst. The tests
+came after, and each one now fails without its fix.
+
+The invariant check is the reason none of them shipped. It refused to upload a segment index with
+duplicate keys, which is what turned a silent corruption into a failed job.
+
 ## v0.1 "Schema & First Bars" — exit checklist passed 2026-08-20
 
 **The gate:** roadmap §4/v0.1 — at least 100 liquid Binance pairs at both 1h and 1d in a private
