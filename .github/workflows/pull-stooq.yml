@@ -28,6 +28,14 @@ on:
       symbols:
         description: Comma-separated tickers, for smoke runs. Empty means all of them.
         default: ""
+      force:
+        description: >-
+          Re-pull every series even when its sidecar says it is current. The skip test
+          compares the archive's sha256, so an unchanged dump skips everything — which is
+          right when the data is what changed, and wrong when the *loader* is. Needed after
+          a manifest field is added.
+        type: boolean
+        default: false
       dry_run:
         description: >-
           Write to the runner's disk instead of the Hub. This is the URL-handoff smoke: it
@@ -69,6 +77,7 @@ jobs:
             ${{ inputs.from_staging
                 && format('--from-staging {0}', inputs.from_staging)
                 || format('--archive-url ''{0}''', inputs.archive_url) }} \
+            ${{ inputs.force && '--force' || '' }} \
             ${{ inputs.symbols && format('--symbols {0}', inputs.symbols) || '' }} \
             ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }} \
             ${{ inputs.dry_run && format('--dest {0}/raw-dryrun', runner.temp) || '' }}
