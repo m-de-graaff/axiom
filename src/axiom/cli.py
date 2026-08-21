@@ -1196,13 +1196,21 @@ def derive_tr_cmd(
     twelve thousand copies of a column that is already in the file beside it.
     """
     from axiom.adjust.derive import TR_MANIFEST_PATH, derive_tr
+    from axiom.registry import REGISTRY_PATH, read_registry
 
     setup_logging()
     store = _raw_store(dest)
-    manifests = store.list_manifests()
+    registry_bytes = _read_from(store, dest, REGISTRY_PATH)
+    if registry_bytes is None:
+        typer.echo("no registry; run `axiom registry build` first", err=True)
+        raise typer.Exit(2)
+    rows = read_registry(registry_bytes).to_pylist()
+
     if verdict is None:
         policies = {
-            m.adjustment_policy for m in manifests if m.source == "stooq" and m.frequency == "1d"
+            r["adjustment_policy"]
+            for r in rows
+            if r["source"] == "stooq" and r["frequency"] == "1d"
         }
         if len(policies) != 1:
             typer.echo(
@@ -1214,7 +1222,7 @@ def derive_tr_cmd(
             raise typer.Exit(2)
         verdict = policies.pop()
 
-    run = derive_tr(store, manifests, verdict=verdict, limit=limit)
+    run = derive_tr(store, rows, verdict=verdict, limit=limit)
     _write_to(store, dest, TR_MANIFEST_PATH, run.to_json().encode("utf-8"))
     typer.echo(run.line())
     for failure in run.failed:

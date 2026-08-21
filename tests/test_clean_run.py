@@ -376,12 +376,16 @@ def test_red_flags_fire_on_a_major_that_loses_too_much(tier) -> None:
 def test_identity_verdict_writes_a_manifest_and_no_bar_files(tier) -> None:
     """ADR-0019: `tr_close == close` here, and twelve thousand copies of `close` is not a tier."""
     store, manifests = tier
-    run = derive_tr(store, manifests, verdict=POLICY_SPLIT_AND_DIVIDEND)
+    run = derive_tr(store, registry_of(manifests).to_pylist(), verdict=POLICY_SPLIT_AND_DIVIDEND)
     assert run.materialized is False
     assert run.available == 1 and len(run.tickers) == 1
     assert run.coverage_pct() == 100.0
     assert run.tickers[0].materialized is False
-    assert run.tickers[0].dividend_events == 1
+    assert run.tickers[0].events_captured is True
+    assert run.tickers[0].event_rows == 2
+    # Counting dividends means downloading the event file, and the identity branch
+    # has no reason to, so it does not.
+    assert run.tickers[0].dividend_events is None
 
     payload = json.loads(run.to_json())
     assert payload["verdict"] == POLICY_SPLIT_AND_DIVIDEND
@@ -393,9 +397,10 @@ def test_identity_verdict_writes_a_manifest_and_no_bar_files(tier) -> None:
 def test_accumulation_verdict_materializes_the_tier(tier) -> None:
     """The branch a re-audit would switch on. It writes real files, and they read back."""
     store, manifests = tier
-    run = derive_tr(store, manifests, verdict=POLICY_SPLIT_ONLY)
+    run = derive_tr(store, registry_of(manifests).to_pylist(), verdict=POLICY_SPLIT_ONLY)
     assert run.materialized is True
     assert run.tickers[0].materialized is True
+    assert run.tickers[0].dividend_events == 1
 
     written = sorted(Path(store.root).glob("derived/tr_close/**/*.parquet"))
     assert len(written) == 1

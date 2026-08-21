@@ -11,8 +11,14 @@ What gets written depends on the recorded verdict, and that is the whole design:
   recomputing it per read would be both slow and a reproducibility hazard. The letter-sharded
   Parquet tier is written.
 
-The interface downstream sees is the same either way. Which one ran is recorded in the manifest,
-so a reader that finds no bar files knows why rather than guessing.
+The input is **registry rows, not sidecars**. Everything this needs -- symbol, adjustment policy,
+artifact hash, row count -- is already a column in the registry, and the registry exists precisely
+so that a question about the whole corpus costs one small file instead of thirteen thousand HTTPS
+round trips. The first version asked the store for every sidecar and was rate-limited off the Hub
+for its trouble.
+
+Under an identity verdict that makes this job **read nothing at all** beyond the registry: no bar
+files, no event files, no downloads. It is a few thousand dictionary lookups and a JSON write.
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ import io
 import json
 import logging
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 import pyarrow.parquet as pq
 
@@ -57,7 +64,15 @@ class TickerCoverage:
     tr_available: bool
     materialized: bool
     n_bars: int
-    dividend_events: int
+    #: Corporate actions captured for this ticker: splits and dividends together, from the
+    #: registry's row count for its event artifact. Zero means none were captured, which is not
+    #: the same as none happened -- see `events_captured`.
+    event_rows: int
+    #: Whether an event series exists for this ticker at all.
+    events_captured: bool
+    #: Dividends specifically. Only filled when the branch actually read the event file, because
+    #: counting them means downloading it and the identity branch has no reason to.
+    dividend_events: int | None
     derived_from_sha256: str
     events_sha256: str = ""
     error: str = ""
@@ -69,7 +84,6 @@ class DeriveRun:
 
     verdict: str
     policy_by_source: dict[str, str]
-    clean_config_hash: str = ""
     materialized: bool = False
     tickers: list[TickerCoverage] = field(default_factory=list)
 
@@ -92,6 +106,7 @@ class DeriveRun:
             "tickers_total": len(self.tickers),
             "tr_available": self.available,
             "coverage_pct": round(self.coverage_pct(), 3),
+            "with_events_captured": sum(1 for t in self.tickers if t.events_captured),
             "failed": len(self.failed),
             "tickers": [asdict(t) for t in sorted(self.tickers, key=lambda t: t.symbol)],
         }
@@ -99,9 +114,11 @@ class DeriveRun:
 
     def line(self) -> str:
         mode = "materialized" if self.materialized else "identity (manifest only)"
+        captured = sum(1 for t in self.tickers if t.events_captured)
         return (
             f"verdict={self.verdict} {mode}: {self.available}/{len(self.tickers)} tickers "
-            f"tr_available ({self.coverage_pct():.1f}%), {len(self.failed)} failed"
+            f"tr_available ({self.coverage_pct():.1f}%), {captured} with captured corporate "
+            f"actions, {len(self.failed)} failed"
         )
 
 
@@ -112,31 +129,37 @@ def _read_table(store: RawStore, path: str):
 
 def derive_tr(
     store: RawStore,
-    manifests: list[FileManifest],
+    rows: list[dict[str, Any]],
     *,
     verdict: str,
     limit: int | None = None,
 ) -> DeriveRun:
-    """Build the total-return tier from the raw bars and the captured events.
+    """Build the total-return tier from registry rows.
 
-    ``verdict`` comes from the recorded audit -- `adjustment_policy` on the Stooq manifests -- and
-    is passed in rather than re-derived, because re-deriving it here would mean two places that
+    ``rows`` are registry records -- `axiom.registry.read_registry(...).to_pylist()`. ``store`` is
+    touched only when the verdict needs bars and events, which under the recorded verdict it does
+    not.
+
+    ``verdict`` comes from the recorded audit -- `adjustment_policy` on the Stooq rows -- and is
+    passed in rather than re-derived, because re-deriving it here would mean two places that
     disagree about what the vendor did.
     """
     materialize = needs_events(verdict)
     bars = sorted(
         (
-            m
-            for m in manifests
-            if m.source == TR_SOURCE and m.market == TR_MARKET and m.frequency == TR_FREQUENCY
+            r
+            for r in rows
+            if r["source"] == TR_SOURCE
+            and r["market"] == TR_MARKET
+            and r["frequency"] == TR_FREQUENCY
         ),
-        key=lambda m: m.symbol,
+        key=lambda r: r["symbol"],
     )
     if limit is not None:
         bars = bars[:limit]
 
-    events_by_symbol = {
-        m.symbol: m for m in manifests if m.source == EVENTS_SOURCE and m.frequency == "events"
+    events_rows = {
+        r["symbol"]: r for r in rows if r["source"] == EVENTS_SOURCE and r["frequency"] == "events"
     }
     run = DeriveRun(
         verdict=verdict,
@@ -144,39 +167,37 @@ def derive_tr(
         materialized=materialize,
     )
 
-    for manifest in bars:
-        symbol = manifest.symbol
-        events_manifest = events_by_symbol.get(symbol)
-        events = None
-        if events_manifest is not None:
-            events = _read_table(store, events_path(symbol))
-        dividends = 0
-        if events is not None and events.num_rows:
-            dividends = sum(1 for t in events["event_type"].to_pylist() if t == "dividend")
-
+    for row in bars:
+        symbol = row["symbol"]
+        event_row = events_rows.get(symbol)
         coverage = TickerCoverage(
             symbol=symbol,
-            tr_available=tr_available(events, verdict),
+            tr_available=tr_available(event_row, verdict),
             materialized=False,
-            n_bars=manifest.row_count,
-            dividend_events=dividends,
-            derived_from_sha256=manifest.artifact_sha256,
-            events_sha256=events_manifest.artifact_sha256 if events_manifest else "",
+            n_bars=int(row["row_count"]),
+            event_rows=int(event_row["row_count"]) if event_row else 0,
+            events_captured=event_row is not None,
+            dividend_events=None,
+            derived_from_sha256=row["artifact_sha256"],
+            events_sha256=event_row["artifact_sha256"] if event_row else "",
         )
 
         if materialize and coverage.tr_available:
             try:
-                table = _read_table(store, manifest.artifact_path)
+                events = _read_table(store, events_path(symbol)) if event_row else None
+                if events is not None:
+                    coverage.dividend_events = sum(
+                        1 for t in events["event_type"].to_pylist() if t == "dividend"
+                    )
+                table = _read_table(store, row["artifact_path"])
                 if table is None:
-                    raise FileNotFoundError(manifest.artifact_path)
+                    raise FileNotFoundError(row["artifact_path"])
                 tr = tr_close(table, events, verdict)
                 buffer = io.BytesIO()
                 pq.write_table(tr, buffer, compression="zstd", row_group_size=ROW_GROUP_SIZE)
                 payload = buffer.getvalue()
                 store.put(
-                    tr_artifact_path(symbol),
-                    payload,
-                    _derived_manifest(manifest, payload, verdict),
+                    tr_artifact_path(symbol), payload, _derived_manifest(row, payload, verdict)
                 )
                 coverage.materialized = True
             except Exception as exc:  # one bad ticker must not lose the other twelve thousand
@@ -191,30 +212,30 @@ def derive_tr(
     return run
 
 
-def _derived_manifest(source: FileManifest, payload: bytes, verdict: str) -> FileManifest:
+def _derived_manifest(row: dict[str, Any], payload: bytes, verdict: str) -> FileManifest:
     """A sidecar for a derived file: what it came from, and under which policy.
 
     ``source_urls`` names the raw artifact rather than a vendor URL, because that *is* where these
     bytes came from -- the derived tier's provenance chain ends at the raw tier, which has its own.
     """
     return FileManifest(
-        schema_version=source.schema_version,
+        schema_version=int(row["schema_version"]),
         source="derived",
         market=TR_MARKET,
-        asset_class=source.asset_class,
-        symbol=source.symbol,
+        asset_class=row["asset_class"],
+        symbol=row["symbol"],
         frequency=TR_FREQUENCY,
-        pull_run_id=source.pull_run_id,
-        pulled_at=source.pulled_at,
-        loader_version=source.loader_version,
-        source_urls=[source.artifact_path],
-        source_sha256s=[source.artifact_sha256],
-        artifact_path=tr_artifact_path(source.symbol),
+        pull_run_id=row["pull_run_id"],
+        pulled_at=row["pulled_at"],
+        loader_version=row["loader_version"],
+        source_urls=[row["artifact_path"]],
+        source_sha256s=[row["artifact_sha256"]],
+        artifact_path=tr_artifact_path(row["symbol"]),
         artifact_sha256=sha256_bytes(payload),
-        row_count=source.row_count,
-        first_ts=source.first_ts,
-        last_ts=source.last_ts,
-        gap_count=source.gap_count,
+        row_count=int(row["row_count"]),
+        first_ts=int(row["first_ts"]),
+        last_ts=int(row["last_ts"]),
+        gap_count=int(row["gap_count"]),
         adjustment_policy=verdict,
-        universe_hash=source.universe_hash,
+        universe_hash=row["universe_hash"],
     )

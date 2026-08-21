@@ -170,13 +170,17 @@ def tr_close(
     )
 
 
-def tr_available(events: pa.Table | None, verdict: str) -> bool:
+def tr_available(events: object | None, verdict: str) -> bool:
     """Can a truthful total-return series be built for this instrument?
 
     Under an identity verdict: always, and without events. Under accumulation: only if the event
     series was actually captured. A ticker whose yfinance fetch failed has *unknown* dividends,
     which is not the same as *no* dividends, and treating the two alike would approximate exactly
     the names that pay the most.
+
+    ``events`` is only tested for presence, so a registry row standing in for the event series is
+    as good an answer as the table itself -- and it is the cheaper one, because establishing that
+    a file exists should not require downloading it.
     """
     if not needs_events(verdict):
         return True
