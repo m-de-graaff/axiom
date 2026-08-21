@@ -490,6 +490,26 @@ What "sane" looks like: crypto majors lose approximately nothing; the losses con
 small-cap equities and exotic pairs; FX weekend gaps contribute exactly zero, because they are
 expected; illiquid and stagnant excisions cluster in the thin tail.
 
+### Stamping an audit verdict into the sidecars
+
+```sh
+gh workflow run corpus.yml -f job=stamp-verdict
+```
+
+Writes `adjustment_policy_verified` into every sidecar of a source and rebuilds the registry.
+Run it after any `axiom raw audit-adjustments` that produces a new verdict.
+
+Safe to interrupt and safe to repeat. Only sidecars are written; `adjustment_policy_verified` sits
+outside `manifest_sha256`, so no Parquet is rewritten, no `artifact_sha256` moves, and the segment
+index bound to those hashes stays valid. A sidecar that already carries the verdict is skipped, so
+a re-run after a partial pass costs only the files it did not reach.
+
+`--dry-run` reports what would change and writes nothing.
+
+**Do not "fix" `adjustment_policy` instead.** That field is inside the identity hash and inside
+every Parquet's metadata; editing it breaks the file-to-sidecar link on twelve thousand artifacts
+and is a re-pull, not an edit (ADR-0019).
+
 ### The derived total-return tier
 
 ```sh

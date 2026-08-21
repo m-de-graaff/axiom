@@ -106,3 +106,36 @@ none for a name, that name is excluded from dividend-sensitive eval slices and s
 - Survivorship applies to the verdict itself. The audit sampled tickers that still exist; it says
   what Stooq did to survivors and nothing about the delisted (ADR-0016). Inherited by everything
   downstream and repeated in `LIMITATIONS.md`.
+
+
+---
+
+## Amendment, 2026-08-21 — the verdict is stamped into the sidecars
+
+All 12,425 Stooq sidecars recorded `adjustment_policy: vendor_adjusted_unverified`, which is what
+the loader honestly believed at pull time: the audit had not run yet. It ran afterwards. Leaving
+the sidecars alone meant the first thing a reader of `axiom-raw` saw was "unverified" for a corpus
+that had in fact been verified.
+
+Correcting the field in place is not possible. `adjustment_policy` is inside `manifest_sha256`,
+which is stamped into every Parquet's own key-value metadata, so editing it breaks the
+file-to-sidecar link on twelve thousand artifacts and turns a label fix into a re-pull — which
+would also change `artifact_sha256` and invalidate the entire segment index.
+
+**So the verdict goes in a second field, `adjustment_policy_verified`, held outside the identity
+hash.** `VOLATILE_MANIFEST_FIELDS` already exists for exactly this category: things that describe
+the run rather than the bytes. A measurement made after the pull belongs there — the same file
+with and without a verdict written against it is the same file. `adjustment_policy` itself stays
+*in* the hash, because that one is a property of the bytes: a split-adjusted file and an
+unadjusted one are different data.
+
+Two fields rather than one correction, because they are two different facts and both are worth
+keeping: what was known when the file was written, and what was established afterwards.
+
+`axiom raw stamp-verdict --source stooq` writes it, batched into about seven Hub commits. Nothing
+but sidecars is touched, no `artifact_sha256` moves, and `clean/v1/` stays valid. It is
+idempotent, so a partial run costs only what it did not reach, and a test asserts the property the
+whole approach rests on: stamping does not move `manifest_sha256`.
+
+`axiom derive tr` reads the stamped verdict when it is there and falls back to `RECORDED_POLICY`
+when it is not, saying which happened either way.

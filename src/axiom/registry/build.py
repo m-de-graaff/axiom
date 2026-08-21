@@ -64,6 +64,7 @@ REGISTRY_SCHEMA = pa.schema(
         pa.field("volume_convention", pa.string(), nullable=False),
         pa.field("amount_synthesized", pa.bool_(), nullable=False),
         pa.field("adjustment_policy", pa.string(), nullable=False),
+        pa.field("adjustment_policy_verified", pa.string(), nullable=False),
         pa.field("redistribution_class", pa.string(), nullable=False),
         pa.field("universe_hash", pa.string(), nullable=False),
         pa.field("pull_run_id", pa.string(), nullable=False),
@@ -113,6 +114,7 @@ def manifest_row(manifest: FileManifest, *, artifact_bytes: int = 0) -> dict[str
     row["history_days"] = round((manifest.last_ts - manifest.first_ts) / MS_PER_DAY, 3)
     row["artifact_bytes"] = int(artifact_bytes)
     row["closed_window_count"] = int(manifest.closed_window_count)
+    row["adjustment_policy_verified"] = manifest.adjustment_policy_verified
     row["median_dollar_volume"] = float(manifest.median_dollar_volume)
     for name in _LIST_FIELDS:
         row.pop(name, None)

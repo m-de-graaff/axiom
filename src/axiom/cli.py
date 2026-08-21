@@ -914,6 +914,57 @@ def raw_crosscheck_equities(
         typer.echo(f"wrote {out}")
 
 
+@raw_app.command("stamp-verdict")
+def raw_stamp_verdict(
+    source: Annotated[str, typer.Option("--source", help="Which source's sidecars to stamp.")] = (
+        "stooq"
+    ),
+    verdict: Annotated[
+        str | None, typer.Option("--verdict", help="Override the recorded verdict. Testing only.")
+    ] = None,
+    dest: Annotated[Path | None, typer.Option("--dest", help="Stamp a local raw tier.")] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Report what would change and write nothing.")
+    ] = False,
+) -> None:
+    """Write the measured adjustment verdict into a source's sidecars (ADR-0019).
+
+    The audit measured what the vendor had already done to its prices; the sidecars kept saying
+    what the loader believed *before* it ran. Both are true, so the verdict goes into a second
+    field rather than overwriting the first.
+
+    Nothing but sidecars is touched. `adjustment_policy_verified` is outside `manifest_sha256`, so
+    no Parquet is rewritten, no `artifact_sha256` moves, and the segment index bound to those
+    hashes stays valid. Idempotent: a sidecar that already carries the verdict is skipped.
+    """
+    from axiom.adjust.policy import RECORDED_POLICY
+    from axiom.raw.verdict import stamp_verdict
+
+    setup_logging()
+    if verdict is None:
+        if source not in RECORDED_POLICY:
+            typer.echo(
+                f"no recorded verdict for {source!r}; ADR-0019 records "
+                f"{sorted(RECORDED_POLICY)}. Pass --verdict to stamp something else.",
+                err=True,
+            )
+            raise typer.Exit(2)
+        verdict = RECORDED_POLICY[source]
+
+    store = _raw_store(dest)
+    typer.echo(f"reading sidecars from {'the Hub' if dest is None else dest}...")
+    run = stamp_verdict(
+        store, store.list_manifests(), source=source, verdict=verdict, dry_run=dry_run
+    )
+    typer.echo(("DRY RUN " if dry_run else "") + run.line())
+    for failure in run.failures:
+        typer.echo(f"  FAILED {failure['artifact_path']}: {failure['error']}", err=True)
+    if run.failures:
+        raise typer.Exit(1)
+    if run.stamped and not dry_run:
+        typer.echo("run `axiom registry build` so the registry carries the verdict too")
+
+
 @registry_app.command("build")
 def registry_build(
     dest: Annotated[
@@ -1362,20 +1413,31 @@ def derive_tr_cmd(
     if verdict is None:
         from axiom.adjust.policy import RECORDED_POLICY
 
-        verdict = RECORDED_POLICY["stooq"]
-        # The sidecars record what the loader believed at pull time, which for Stooq was
-        # `vendor_adjusted_unverified` because the audit had not run yet. Saying so out loud beats
-        # letting the two drift quietly apart (ADR-0019).
-        believed = {
-            r["adjustment_policy"]
+        # A sidecar carries two facts: `adjustment_policy` is what the loader believed at pull
+        # time, `adjustment_policy_verified` is what an audit measured afterwards. Prefer the
+        # measurement once it has been stamped; fall back to the ADR-0019 constant until then,
+        # and say which one happened.
+        measured = {
+            r.get("adjustment_policy_verified", "")
             for r in rows
             if r["source"] == "stooq" and r["frequency"] == "1d"
-        }
-        stale = believed - {verdict}
-        if stale:
+        } - {""}
+        if len(measured) > 1:
             typer.echo(
-                f"note: the Stooq sidecars still record {sorted(stale)}; the measured verdict is "
-                f"{verdict} (docs/reports/v0.2-adjustment-audit.md) and that is what is used"
+                f"the Stooq sidecars carry {len(measured)} different verified verdicts "
+                f"({sorted(measured)}); re-run `axiom raw stamp-verdict` before deriving",
+                err=True,
+            )
+            raise typer.Exit(2)
+        if measured:
+            verdict = measured.pop()
+            typer.echo(f"verdict {verdict} read from the Stooq sidecars")
+        else:
+            verdict = RECORDED_POLICY["stooq"]
+            typer.echo(
+                f"note: no verdict stamped into the Stooq sidecars; using the recorded {verdict} "
+                "(docs/reports/v0.2-adjustment-audit.md). "
+                "`axiom raw stamp-verdict` writes it into them."
             )
 
     run = derive_tr(store, rows, verdict=verdict, limit=limit)

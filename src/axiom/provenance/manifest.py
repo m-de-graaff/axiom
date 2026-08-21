@@ -39,8 +39,24 @@ SIDECAR_SUFFIX = ".manifest.json"
 #:
 #: ``artifact_sha256`` is excluded for a second reason as well -- it is the hash *of* the file
 #: whose metadata carries ``manifest_sha256``, so including it would be circular.
+#:
+#: ``adjustment_policy_verified`` is excluded for a third reason (v0.3, ADR-0019). It records a
+#: measurement made **after** the pull, so it is knowledge about the bytes rather than a property
+#: of them: the same file with and without a verdict written against it is the same file. Keeping
+#: it out of the hash is what lets the verdict be stamped into twelve thousand sidecars without
+#: rewriting a single Parquet -- the `manifest_sha256` embedded in each file still matches, and
+#: the segment index bound to `artifact_sha256` stays valid.
+#:
+#: ``adjustment_policy`` itself stays *in* the hash, because that one is a property of the bytes:
+#: a split-adjusted file and an unadjusted one are different data.
 VOLATILE_MANIFEST_FIELDS: frozenset[str] = frozenset(
-    {"pull_run_id", "pulled_at", "artifact_sha256", "loader_version"}
+    {
+        "pull_run_id",
+        "pulled_at",
+        "artifact_sha256",
+        "loader_version",
+        "adjustment_policy_verified",
+    }
 )
 
 #: Fields v0.2 added (ADR-0014), with the value that means "what v0.1 already meant".
@@ -111,7 +127,16 @@ class FileManifest(BaseModel):
     # natively; a source without a native quote volume gets `amount` synthesized and says so.
     volume_convention: str = "base+quote_native"
     amount_synthesized: bool = False
+    #: What the loader believed at pull time. For Stooq that was honestly
+    #: `vendor_adjusted_unverified`: nobody had checked yet.
     adjustment_policy: str = "none"
+    #: What a later audit **measured**, empty until one has run (ADR-0019).
+    #:
+    #: Two fields rather than one correction, because they are two different facts and both are
+    #: worth keeping: what was known when the file was written, and what was established
+    #: afterwards. Outside the identity hash, so stamping it costs a sidecar rewrite and nothing
+    #: else -- see :data:`VOLATILE_MANIFEST_FIELDS`.
+    adjustment_policy_verified: str = ""
 
     #: What the four prices are quotes of: `trade` or `bid` (ADR-0014).
     price_side: str = "trade"

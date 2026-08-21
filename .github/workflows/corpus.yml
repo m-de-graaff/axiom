@@ -15,7 +15,7 @@ on:
       job:
         description: Which to run.
         type: choice
-        options: [universe, audit, both]
+        options: [universe, audit, both, stamp-verdict]
         default: both
       top_n:
         description: Tickers to keep in the equities universe.
@@ -66,6 +66,26 @@ jobs:
           uv run axiom raw audit-adjustments \
             --out docs/reports/v0.2-adjustment-audit.md \
             --sample '${{ inputs.sample }}'
+
+      # Sidecars only. `adjustment_policy_verified` sits outside `manifest_sha256`, so no Parquet
+      # is rewritten and the segment index bound to `artifact_sha256` stays valid (ADR-0019).
+      - name: Stamp the measured adjustment verdict into the sidecars
+        if: inputs.job == 'stamp-verdict'
+        env:
+          AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
+          AXIOM_GIT_COMMIT: ${{ github.sha }}
+          AXIOM_DISABLE_TRACKING: "1"
+          HF_HUB_DISABLE_XET: "1"
+        run: uv run axiom raw stamp-verdict --source stooq
+
+      - name: Rebuild the registry so it carries the verdict
+        if: inputs.job == 'stamp-verdict'
+        env:
+          AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
+          AXIOM_GIT_COMMIT: ${{ github.sha }}
+          AXIOM_DISABLE_TRACKING: "1"
+          HF_HUB_DISABLE_XET: "1"
+        run: uv run axiom registry build
 
       - name: Upload whatever was produced
         if: always()

@@ -48,6 +48,8 @@ class RawStore(Protocol):
 
     def put(self, artifact_path: str, data: bytes, manifest: FileManifest) -> None: ...
 
+    def stage_bytes(self, path_in_repo: str, data: bytes) -> None: ...
+
     def list_manifests(self) -> list[FileManifest]: ...
 
     def flush(self) -> None: ...
@@ -77,6 +79,11 @@ class LocalRawStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
         self._path(artifact_path + SIDECAR_SUFFIX).write_text(manifest.to_json(), encoding="utf-8")
+
+    def stage_bytes(self, path_in_repo: str, data: bytes) -> None:
+        path = self._path(path_in_repo)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
 
     def list_manifests(self) -> list[FileManifest]:
         paths = sorted(self.root.rglob(f"*{SIDECAR_SUFFIX}"))
@@ -190,6 +197,19 @@ class HubRawStore:
             manifest.to_json(), encoding="utf-8"
         )
         self._staged += 2
+        if self._staged >= self.batch_size:
+            self._commit()
+
+    def stage_bytes(self, path_in_repo: str, data: bytes) -> None:
+        """Add one file to the next batched commit.
+
+        For writing many small files that are not bar artifacts -- twelve thousand sidecars, say.
+        `upload_bytes` would be one Hub commit each, and the Hub allows 128 an hour.
+        """
+        staged = self.staging / path_in_repo
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        staged.write_bytes(data)
+        self._staged += 1
         if self._staged >= self.batch_size:
             self._commit()
 
