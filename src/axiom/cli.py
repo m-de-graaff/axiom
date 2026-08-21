@@ -370,8 +370,7 @@ def pull_binance(
     )
     for failure in final.failures:
         typer.echo(f"  FAIL {failure.market}/{failure.frequency}/{failure.symbol}: {failure.error}")
-    if final.failed:
-        raise typer.Exit(1)
+    _exit_on_operational_failures(final)
 
 
 @pull_app.command("dukascopy")
@@ -452,8 +451,7 @@ def pull_dukascopy(
     )
     for failure in final.failures:
         typer.echo(f"  FAIL {failure.market}/{failure.frequency}/{failure.symbol}: {failure.error}")
-    if final.failed:
-        raise typer.Exit(1)
+    _exit_on_operational_failures(final)
 
 
 @pull_app.command("stooq")
@@ -589,6 +587,30 @@ def pull_stooq(
     )
     if parse_rate > 0.001:
         typer.echo("parse-failure rate is over the 0.1% tolerance", err=True)
+        raise typer.Exit(1)
+
+
+def _exit_on_operational_failures(final) -> None:
+    """Exit non-zero only when the *pipeline* failed, not when the vendor did.
+
+    A series refused by `validate_bars` was ingested correctly and found to be impossible — the
+    vendor published a bar with `high < low`, and ADR-0010 declines to repair it. That is a fact
+    about the data, it is recorded in the run manifest and printed above, and it will recur on
+    every future pull because the vendor is not going to fix 2007. Exiting non-zero on it means a
+    Dukascopy pull reports failure forever over one bad instrument, which trains a human to stop
+    reading the status.
+
+    Anything else — a refused download, a Hub error, a parse that fell over — is operational and
+    still fails the run.
+    """
+    operational = [f for f in final.failures if not f.error.startswith("ValueError: bars:")]
+    rejected = len(final.failures) - len(operational)
+    if rejected:
+        typer.echo(
+            f"{rejected} series rejected on invariants: the vendor published bars that cannot be "
+            "true. They are absent from the tier and listed above."
+        )
+    if operational:
         raise typer.Exit(1)
 
 

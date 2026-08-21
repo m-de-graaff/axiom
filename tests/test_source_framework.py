@@ -299,3 +299,69 @@ def test_a_failing_final_flush_does_not_lose_the_run_manifest():
 
     assert run.manifest.ok == 1, "the item still landed"
     assert "429" in run.manifest.flush_error, "and the run says its tail did not commit"
+
+
+# --- what counts as a failed run ----------------------------------------------------------------
+
+
+def run_manifest_with(errors: list[str]):
+    from axiom.provenance.manifest import PullFailure, PullRunManifest
+
+    return PullRunManifest(
+        pull_run_id="r",
+        started_at="2026-08-21T00:00:00+00:00",
+        loader_version="test",
+        backend_tag="test",
+        universe_hash="0123456789ab",
+        universe_path="n/a",
+        markets=["fx"],
+        frequencies=["1h"],
+        ok=52,
+        failed=len(errors),
+        failures=[
+            PullFailure(market="fx", symbol=f"S{i}", frequency="1h", error=e)
+            for i, e in enumerate(errors)
+        ],
+    )
+
+
+def test_a_vendors_impossible_bar_does_not_fail_the_run():
+    """Otherwise a Dukascopy pull reports failure forever over one bad instrument, and a human
+    learns to stop reading the status."""
+    import typer
+
+    from axiom.cli import _exit_on_operational_failures
+
+    manifest = run_manifest_with(
+        ["ValueError: bars: 6889 rows, 1d, violations -- high_below_open_or_close: 2 row(s)"]
+    )
+    try:
+        _exit_on_operational_failures(manifest)
+    except typer.Exit as exc:  # pragma: no cover - the point is that this does not happen
+        raise AssertionError(f"exited {exc.exit_code} on a vendor data defect") from exc
+
+
+def test_an_operational_failure_still_fails_the_run():
+    import typer
+
+    from axiom.cli import _exit_on_operational_failures
+
+    manifest = run_manifest_with(["HfHubHTTPError: 429 Too Many Requests"])
+    with pytest.raises(typer.Exit):
+        _exit_on_operational_failures(manifest)
+
+
+def test_one_operational_failure_among_vendor_defects_still_fails():
+    """The mix must not launder a real problem through a pile of known-bad instruments."""
+    import typer
+
+    from axiom.cli import _exit_on_operational_failures
+
+    manifest = run_manifest_with(
+        [
+            "ValueError: bars: 10 rows, 1d, violations -- high_below_low: 1 row(s)",
+            "HfHubHTTPError: 429 Too Many Requests",
+        ]
+    )
+    with pytest.raises(typer.Exit):
+        _exit_on_operational_failures(manifest)
