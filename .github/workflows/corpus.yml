@@ -1,0 +1,78 @@
+# The two jobs that read the whole corpus and write a committed artifact out of it:
+# the equities training universe, and the adjustment audit.
+#
+# Both produce a file that belongs in git rather than in `axiom-raw` — a universe is code
+# (ADR-0011) and an audit is a record. Neither is committed from here: the workflow uploads them
+# and a human commits what they have read. A job that writes to its own repo can be right a
+# hundred times and wrong once, and the wrong one is a corpus definition changing under a model
+# that already trained on it.
+
+name: corpus
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Which to run.
+        type: choice
+        options: [universe, audit, both]
+        default: both
+      top_n:
+        description: Tickers to keep in the equities universe.
+        default: "3000"
+      sample:
+        description: Tickers to compare against Yahoo in the audit.
+        default: "25"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: corpus
+  cancel-in-progress: false
+
+jobs:
+  corpus:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # `data` brings yfinance, which only the audit's cross-check half needs.
+      - run: uv sync --frozen --extra data
+
+      - name: Build the equities universe
+        if: inputs.job == 'universe' || inputs.job == 'both'
+        env:
+          AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
+          AXIOM_GIT_COMMIT: ${{ github.sha }}
+          AXIOM_DISABLE_TRACKING: "1"
+        run: |
+          uv run axiom universe build-equities \
+            --out src/axiom/configs/universe_equities_v1.yaml \
+            --top-n '${{ inputs.top_n }}'
+
+      - name: Audit what Stooq already adjusted
+        if: inputs.job == 'audit' || inputs.job == 'both'
+        env:
+          AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
+          AXIOM_GIT_COMMIT: ${{ github.sha }}
+          AXIOM_DISABLE_TRACKING: "1"
+        run: |
+          uv run axiom raw audit-adjustments \
+            --out docs/reports/v0.2-adjustment-audit.md \
+            --sample '${{ inputs.sample }}'
+
+      - name: Upload whatever was produced
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: corpus-outputs
+          path: |
+            src/axiom/configs/universe_equities_v1.yaml
+            docs/reports/v0.2-adjustment-audit.md
+          if-no-files-found: warn

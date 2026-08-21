@@ -167,6 +167,19 @@ registry-local dest=".artifacts/raw-local":
 registry-query sql:
     uv run axiom registry query "{{sql}}"
 
+# --- the v0.2 corpus artifacts ---
+
+# Build the equities universe and run the adjustment audit in the cloud.
+corpus job="both":
+    gh workflow run corpus.yml -f job={{job}}
+
+# Fetch what the corpus job produced, into the paths they belong in.
+corpus-fetch:
+    gh run download $(gh run list --workflow=corpus.yml --limit 1 --json databaseId -q '.[0].databaseId') -n corpus-outputs -D .
+
+corpus-watch:
+    gh run watch $(gh run list --workflow=corpus.yml --limit 1 --json databaseId -q '.[0].databaseId') --exit-status
+
 # Create the private axiom-raw dataset and seed its front page. Idempotent.
 bootstrap-raw:
     gh workflow run bootstrap.yml -f repo=axiom-raw
