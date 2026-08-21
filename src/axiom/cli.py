@@ -6,6 +6,7 @@ argv, which is what makes a cloud result comparable to a local one.
 
 from __future__ import annotations
 
+import io
 import os
 from pathlib import Path
 from typing import Annotated
@@ -24,12 +25,16 @@ universe_app = typer.Typer(no_args_is_help=True, help="Build and inspect the pin
 pull_app = typer.Typer(no_args_is_help=True, help="Land source data in the raw tier.")
 raw_app = typer.Typer(no_args_is_help=True, help="Inspect, verify and summarize the raw tier.")
 registry_app = typer.Typer(no_args_is_help=True, help="Build and query the corpus registry.")
+clean_app = typer.Typer(no_args_is_help=True, help="Kronos Algorithm 1 over the corpus (v0.3).")
+derive_app = typer.Typer(no_args_is_help=True, help="Build derived tiers from the raw one.")
 app.add_typer(config_app, name="config")
 app.add_typer(loop_app, name="loop")
 app.add_typer(universe_app, name="universe")
 app.add_typer(pull_app, name="pull")
 app.add_typer(raw_app, name="raw")
 app.add_typer(registry_app, name="registry")
+app.add_typer(clean_app, name="clean")
+app.add_typer(derive_app, name="derive")
 
 
 def _csv(value: str) -> list[str]:
@@ -1019,6 +1024,195 @@ def registry_query(
     # registry is queryable as `registry` without registering or copying anything.
     registry = read_registry(data)  # noqa: F841
     typer.echo(duckdb.sql(sql).limit(limit))
+
+
+def _read_from(store, dest: Path | None, path: str) -> bytes | None:
+    """Read one non-bar file — a registry, a segment index — from a local tier or the Hub."""
+    if dest is not None:
+        local = Path(dest) / path
+        return local.read_bytes() if local.exists() else None
+    return store.get(path)
+
+
+def _write_to(store, dest: Path | None, path: str, payload: bytes) -> None:
+    if dest is not None:
+        target = Path(dest) / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+    else:
+        store.upload_bytes(path, payload)
+
+
+@clean_app.command("run")
+def clean_run(
+    config: Annotated[
+        str, typer.Option("--config", help="Cleaning config: a path or a packaged name.")
+    ] = "clean_v1",
+    dest: Annotated[
+        Path | None, typer.Option("--dest", help="Run over a local raw tier and write there.")
+    ] = None,
+    incremental: Annotated[
+        bool,
+        typer.Option("--incremental/--full", help="Re-clean only artifacts whose bytes changed."),
+    ] = False,
+    limit: Annotated[
+        int | None, typer.Option("--limit", help="Clean only the first N artifacts. Smoke runs.")
+    ] = None,
+) -> None:
+    """Clean every bar artifact in the registry into one segment index.
+
+    Writes `clean/v{N}/segments.parquet`, `dropstats.parquet` and `run_manifest.json`. Raw bars
+    are never touched: cleaning produces metadata, so a threshold change costs a rerun over
+    intervals rather than a rewrite of the corpus (ADR-0018).
+
+    `--incremental` re-cleans exactly the artifacts whose `sha256` moved since the last run, and
+    refuses outright if the config hash changed. Segments are never trusted across a config
+    change.
+    """
+    import pyarrow.parquet as pq
+
+    from axiom.clean.config import load_clean_config
+    from axiom.clean.run import (
+        ConfigHashChanged,
+        bar_artifacts,
+        clean_corpus,
+        clean_paths,
+        write_outputs,
+    )
+    from axiom.registry import REGISTRY_PATH, read_registry
+    from axiom.registry.build import registry_metadata
+
+    setup_logging()
+    cfg = load_clean_config(config)
+    store = _raw_store(dest)
+
+    registry_bytes = _read_from(store, dest, REGISTRY_PATH)
+    if registry_bytes is None:
+        typer.echo("no registry; run `axiom registry build` first", err=True)
+        raise typer.Exit(2)
+    registry = read_registry(registry_bytes)
+    refs = bar_artifacts(registry)
+    if limit is not None:
+        refs = refs[:limit]
+
+    paths = clean_paths(cfg.clean_version)
+    existing = existing_drops = None
+    if incremental:
+        segment_bytes = _read_from(store, dest, paths["segments"])
+        drop_bytes = _read_from(store, dest, paths["dropstats"])
+        existing = pq.read_table(io.BytesIO(segment_bytes)) if segment_bytes else None
+        existing_drops = pq.read_table(io.BytesIO(drop_bytes)) if drop_bytes else None
+
+    typer.echo(f"{len(refs)} bar artifact(s), config hash {cfg.config_hash}")
+    try:
+        run = clean_corpus(
+            refs,
+            lambda ref: store.get(ref.artifact_path),
+            cfg,
+            existing=existing,
+            existing_dropstats=existing_drops,
+            incremental=incremental,
+            registry_hash=registry_metadata(registry).get("axiom_registry_hash", ""),
+        )
+    except ConfigHashChanged as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from None
+
+    for path, payload in write_outputs(run).items():
+        _write_to(store, dest, path, payload)
+
+    typer.echo(run.line())
+    for failure in run.failures:
+        typer.echo(f"  FAILED {failure['artifact_path']}: {failure['error']}", err=True)
+    if run.failed:
+        raise typer.Exit(1)
+
+
+@clean_app.command("report")
+def clean_report(
+    config: Annotated[str, typer.Option("--config")] = "clean_v1",
+    dest: Annotated[
+        Path | None, typer.Option("--dest", help="Read a local clean tier instead.")
+    ] = None,
+    out: Annotated[Path | None, typer.Option("--out", help="Also write the markdown here.")] = None,
+) -> None:
+    """Render the post-clean views: usable bars, usable windows, drop rates, red flags.
+
+    The Phase F gate, made mechanical. The red-flag table is what has to be empty — or carry a
+    written investigation — before v0.3 can be tagged.
+    """
+    import pyarrow.parquet as pq
+
+    from axiom.clean.config import load_clean_config
+    from axiom.clean.reports import clean_summary_markdown
+    from axiom.clean.run import clean_paths
+
+    setup_logging()
+    cfg = load_clean_config(config)
+    store = _raw_store(dest)
+    paths = clean_paths(cfg.clean_version)
+
+    tables = {}
+    for key in ("segments", "dropstats"):
+        data = _read_from(store, dest, paths[key])
+        if data is None:
+            typer.echo(f"no {paths[key]}; run `axiom clean run` first", err=True)
+            raise typer.Exit(2)
+        tables[key] = pq.read_table(io.BytesIO(data))
+
+    markdown = clean_summary_markdown(
+        tables["segments"], tables["dropstats"], clean_config_hash=cfg.config_hash
+    )
+    typer.echo(markdown)
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(markdown, encoding="utf-8")
+
+
+@derive_app.command("tr")
+def derive_tr_cmd(
+    dest: Annotated[
+        Path | None, typer.Option("--dest", help="Run over a local raw tier and write there.")
+    ] = None,
+    verdict: Annotated[
+        str | None,
+        typer.Option("--verdict", help="Override the recorded adjustment policy. Testing only."),
+    ] = None,
+    limit: Annotated[int | None, typer.Option("--limit")] = None,
+) -> None:
+    """Build the total-return tier for the equities universe (ADR-0019).
+
+    The verdict comes from the recorded audit — `adjustment_policy` on the Stooq sidecars — and
+    decides what gets written. Under `split_and_dividend_adjusted` the vendor series already *is*
+    the total-return path, so only a coverage manifest is written; materializing would store
+    twelve thousand copies of a column that is already in the file beside it.
+    """
+    from axiom.adjust.derive import TR_MANIFEST_PATH, derive_tr
+
+    setup_logging()
+    store = _raw_store(dest)
+    manifests = store.list_manifests()
+    if verdict is None:
+        policies = {
+            m.adjustment_policy for m in manifests if m.source == "stooq" and m.frequency == "1d"
+        }
+        if len(policies) != 1:
+            typer.echo(
+                f"the Stooq sidecars carry {len(policies)} adjustment policies "
+                f"({sorted(policies)}); re-run `axiom raw audit-adjustments` before deriving a "
+                "total-return series",
+                err=True,
+            )
+            raise typer.Exit(2)
+        verdict = policies.pop()
+
+    run = derive_tr(store, manifests, verdict=verdict, limit=limit)
+    _write_to(store, dest, TR_MANIFEST_PATH, run.to_json().encode("utf-8"))
+    typer.echo(run.line())
+    for failure in run.failed:
+        typer.echo(f"  FAILED {failure.symbol}: {failure.error}", err=True)
+    if run.failed:
+        raise typer.Exit(1)
 
 
 if (

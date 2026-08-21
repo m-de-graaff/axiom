@@ -203,3 +203,25 @@ raw-report-fetch:
 # ADR-0012 safety net: diff axiom-raw against an independent implementation.
 raw-crosscheck symbols="BTCUSDT,ETHUSDT,SOLUSDT":
     gh workflow run raw.yml -f command=crosscheck -f symbol={{symbols}}
+
+# --- the v0.3 cleaning pass ---
+
+# Clean the whole corpus on Modal: registry fan-out -> clean/v1/ in axiom-raw.
+clean-corpus *ARGS:
+    uv run modal run remote/modal/clean_run.py {{ARGS}}
+
+# Smoke run: fifty artifacts, same code path.
+clean-smoke:
+    uv run modal run remote/modal/clean_run.py --limit 50
+
+# Clean a local raw tier instead, for development.
+clean-local dest=".artifacts/raw-local":
+    uv run axiom clean run --dest {{dest}}
+
+# Render the drop-stats report and drop it in docs/reports/.
+clean-report:
+    uv run axiom clean report --out docs/reports/v0.3-clean-qa.md
+
+# Build the derived total-return tier per the recorded adjustment verdict (ADR-0019).
+derive-tr *ARGS:
+    uv run axiom derive tr {{ARGS}}

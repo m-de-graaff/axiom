@@ -496,9 +496,14 @@ def _toplevel_imports(path: Path) -> set[str]:
     return found
 
 
+#: The driver is not part of the pure engine: it reads bytes somebody hands it and writes files.
+#: Purity is a claim about the rules, and `run.py` contains none of them.
+_IMPURE_BY_DESIGN = {"__init__.py", "run.py"}
+
+
 def _module_paths(package: str) -> list[Path]:
     root = Path(__file__).resolve().parents[1] / "src" / "axiom" / package
-    return sorted(p for p in root.glob("*.py") if p.name != "__init__.py")
+    return sorted(p for p in root.glob("*.py") if p.name not in _IMPURE_BY_DESIGN)
 
 
 @pytest.mark.parametrize("path", _module_paths("clean"), ids=lambda p: p.name)
@@ -509,9 +514,23 @@ def test_cleaning_engine_imports_nothing_that_could_do_io(path: Path) -> None:
 
 
 def test_engine_does_not_reach_into_the_raw_tier() -> None:
+    """The rules never fetch their own input. `run.py` is handed bytes and is exempt above.
+
+    An import, not a mention: a docstring is allowed to say what a module deliberately is not
+    next to, and an earlier version of this test failed on exactly that sentence.
+    """
     for path in _module_paths("clean"):
-        source = path.read_text(encoding="utf-8")
-        assert "axiom.raw" not in source and "axiom.registry" not in source, path.name
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            names = (
+                [a.name for a in node.names]
+                if isinstance(node, ast.Import)
+                else [node.module or ""]
+                if isinstance(node, ast.ImportFrom)
+                else []
+            )
+            offenders = [n for n in names if n.startswith(("axiom.raw", "axiom.registry"))]
+            assert not offenders, f"{path.name} imports {offenders}"
 
 
 def test_synthetic_toolkit_shares_no_code_with_the_engine() -> None:
