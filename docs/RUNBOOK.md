@@ -419,6 +419,92 @@ just registry-build
 Cheap and idempotent: an unchanged tier rebuilds to the same `registry_hash`. Run it after every
 pull, because a registry that lags the tier answers yesterday's question with today's confidence.
 
+## The v0.3 cleaning pass
+
+### The rule: clean after every pull
+
+A segment is bound to the `sha256` of the raw file it was derived from. A pull that changes a file
+therefore invalidates its segments, and a segment index that lags the tier answers yesterday's
+question with today's confidence — the same failure the registry has, with worse consequences,
+because the tokenizer reads bars *through* the segment index.
+
+So the order after any pull is fixed: **pull → `just registry-build` → clean.**
+
+```sh
+just clean-smoke            # fifty artifacts, same code path, about forty seconds
+just pull-clean             # the whole corpus
+just clean-watch
+just clean-report-fetch     # lands docs/reports/v0.3-clean-qa.md for a human to read and commit
+```
+
+The workflow runs on a GitHub runner. Modal runs the identical CLI (`just clean-modal`) and is
+still behind the ADR-0009 account gate. Neither ever writes market data to the laptop: cleaning
+reads bars in the cloud and writes intervals.
+
+### Incremental versus full
+
+`--incremental` re-cleans exactly the artifacts whose `sha256` moved since the last run and
+carries the rest forward — both their segments and their drop stats. Use it after a pull that
+touched a handful of series.
+
+```sh
+gh workflow run clean.yml -f incremental=true
+```
+
+**It refuses outright if the config hash changed**, and that refusal is not to be worked around.
+Half a corpus cleaned at one threshold and half at another is not a corpus, and the damage would
+be invisible in the output — every row would look fine and the table as a whole would be a lie.
+When the config changes, rerun in full.
+
+### Bumping `clean_version`
+
+Bump it when the *meaning* of a segment changes: a new stage, a changed stage order, a different
+definition of a run. Do **not** bump it for a threshold tweak — that is what `clean_config_hash`
+is for, and it already invalidates the old segments without moving anything.
+
+1. Edit `clean_version` in `src/axiom/configs/clean_v1.yaml` (or add a `clean_v2.yaml`).
+2. Rerun in full. The outputs land under `clean/v{N}/` and the previous version stays where it is.
+3. Update `docs/REPOS.md` if the layout gained anything, and say in the CHANGELOG what changed
+   about the meaning.
+
+The old directory is kept, not deleted. It is a few megabytes and it is the only way to answer
+"what did the corpus look like when that tokenizer trained".
+
+### Reading the drop statistics
+
+`axiom clean report` renders four tables from `clean/v1/`. Read them in this order:
+
+1. **Usable corpus** — series, segments, usable bars, and usable context-512 windows per slice.
+   The last column is the one that matters: a hundred segments of 300 bars is thirty thousand bars
+   and *zero* windows. This is the number v0.5 sizes the tokenizer corpus against.
+2. **Drop rates by rule** — five rows per slice, each a share of that slice's total bars, so they
+   are directly comparable and sum to the slice's overall loss.
+3. **Red flags** — three checks. A major losing more than 1 % of its bars; the FX weekend
+   producing any dropped segments at all (it must not — the weekend is an expected gap); a source
+   × frequency slice losing more than 15 % overall. **Each hit needs a written investigation
+   before the version gates.** An empty table is the pass condition.
+4. **Top 20 most-cut series** — one line of human verdict each: data problem, real market
+   pathology, or rule artifact.
+
+What "sane" looks like: crypto majors lose approximately nothing; the losses concentrate in
+small-cap equities and exotic pairs; FX weekend gaps contribute exactly zero, because they are
+expected; illiquid and stagnant excisions cluster in the thin tail.
+
+### The derived total-return tier
+
+```sh
+just derive-tr
+```
+
+Reads the recorded `adjustment_policy` from the Stooq sidecars — it does not re-derive the verdict,
+because two places that decide what the vendor did will eventually disagree. Under
+`split_and_dividend_adjusted` it writes `derived/tr_close/manifest.json` and nothing else, because
+`tr_close` equals `close` and twelve thousand copies of a column is not a tier (ADR-0019). If a
+future audit returns `split_adjusted`, the same command materializes the letter-sharded Parquet.
+
+If the command refuses because the sidecars carry more than one policy, run
+`just corpus job=audit` first and commit the verdict it produces.
+
 ## When a Kaggle session dies
 
 Sessions die on the 12-hour cap, on quota exhaustion, and occasionally for no stated reason. None

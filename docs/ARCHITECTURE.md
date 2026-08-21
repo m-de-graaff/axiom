@@ -16,7 +16,7 @@ raw bars → clean → contract (schema_version=1) → BSQ tokenizer → MDS sha
 | C1 | Repo, tooling, config and reproducibility core, dispatch loop | v0.0 | **Built** |
 | C2 | Data acquisition: Binance, Dukascopy, Stooq, yfinance | v0.1–v0.2 | **Built** — all four loaders, complete for v1.0 scope |
 | C3 | Storage: Parquet layout, provenance manifests, corpus registry | v0.1–v0.2 | **Built** — schema, layout, manifests and registry |
-| C4 | Cleaning: Kronos Algorithm 1, Table 4 thresholds, split/dividend policy | v0.3 | Not started |
+| C4 | Cleaning: Kronos Algorithm 1, Table 4 thresholds, split/dividend policy | v0.3 | **Built** — segment index, session-aware gaps, total-return policy |
 | C5 | Preprocessing contract: candle geometry, causal normalization, golden vectors | v0.4 | Not started |
 | C6 | Tokenizer: BSQ default, flat FSQ ablation, temporal firewall | v0.5 | Not started |
 | C7 | Pre-tokenization: uint16 token pairs, time features, conditioning IDs, MDS shards | v0.6 | Not started |
@@ -44,6 +44,52 @@ hard non-goals of this version, not merely things that did not happen.
 **The design rule that makes v0.0 worth doing:** the loop code may not know it is a dummy. What
 v0.5 and v0.7 replace is `_step` and the payload inside `TrainState`. The checkpoint writer, the
 resume path, the config-hash guard, and both dispatch backends are used unchanged.
+
+## What v0.3 built
+
+C4, and no new online infrastructure. Four things are worth knowing before reading the modules.
+
+**Cleaning emits metadata, not data.** The output of a clean run is a table of `[start_ts,
+end_ts]` intervals with the rule that ended each one — never a copy of the bars. Raw Parquet is
+immutable (ADR-0010) and the thresholds will be tuned, so a corpus-shaped output would mean a full
+duplicate per config change and two things that both claim to say what a series contains. Every
+segment row carries `clean_config_hash`, `clean_version` and the `raw_artifact_sha256` of the file
+it came from, which is what makes both guards below possible.
+
+**The gap rule is session-aware, and that is the adaptation.** Kronos's Stage 1 treats any missing
+bar as a hard boundary, which is right for a 24/7 exchange and wrong for everything else: applied
+to FX it would partition every series into weeks and applied to equities into days. So the
+question is not "is a bar missing" but "is a bar missing that should have been there" — strict for
+crypto, a DST-tolerant weekend window for 24x5, the XNYS calendar for US equities. Nothing is ever
+imputed.
+
+**The synthetic toolkit shares no code with the engine.** `axiom.testing.synth` builds its own
+session grids from `exchange_calendars` and plain weekday arithmetic. If it reused the engine's
+calendar, every session test would be checking that a function agrees with itself. A test asserts
+the independence by parsing the imports.
+
+**Purity is enforced, not intended.** The five stage functions and the engine import nothing that
+could open a socket or read a file, checked by an AST pass over their top-level imports. The
+driver is exempt and says so: it is handed bytes and contains none of the rules.
+
+| Module | Does |
+|---|---|
+| `axiom.clean.config` | Table 4 thresholds, session rules, the stage order, and the config hash |
+| `axiom.clean.calendars` | Which missing grid steps each session expects; XNYS via `exchange_calendars` |
+| `axiom.clean.stages` | The five rules, pure and vectorized, composing over spans |
+| `axiom.clean.engine` | Spans to segment rows and drop-stat rows, with the invariants asserted |
+| `axiom.clean.run` | The corpus driver: artifact selection, staleness, config-hash refusal |
+| `axiom.clean.reports` | Usable bars, usable windows, drop rates, top-20, red flags |
+| `axiom.adjust.policy` | `tr_close` — identity or dividend accumulation, per the recorded verdict |
+| `axiom.adjust.derive` | The derived total-return tier, or just its coverage manifest |
+| `axiom.testing.synth` | Series with known pathologies and ground truth about where cuts belong |
+
+**The design rule that makes v0.3 worth doing:** a threshold change must cost a rerun, not a
+rewrite. Everything above follows from that — the segment index, the config hash on every row, the
+staleness guard, and the refusal to run `--incremental` across a config change.
+
+Next up is C5, the preprocessing contract, in v0.4. Gate **G2** stands between it and any
+tokenizer work.
 
 ## What v0.2 built
 
@@ -77,7 +123,7 @@ reproduces the same `registry_hash`. A sidecar that will not parse is reported, 
 | `axiom.universe.dukascopy` | The 27 hand-pinned instruments and their measured start dates |
 | `axiom.universe.equities` | The data-driven equities universe: registry filter, then dollar-volume ranking |
 
-Next up is C4, the cleaning pass, in v0.3.
+Next up was C4, the cleaning pass, in v0.3.
 
 ## What v0.1 built
 

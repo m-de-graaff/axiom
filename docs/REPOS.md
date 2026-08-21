@@ -125,6 +125,17 @@ new repo, no new service, no new account. The table above gains no row.
 The one thing v0.2 changed about the estate is *which backend runs which job*, and that was
 forced by measurement rather than chosen — see the execution-backend notes below and ADR-0015.
 
+## v0.3 created no new online infrastructure either
+
+Same sentence, same reason, and it is worth repeating because "the cleaning pass" sounds like it
+should need somewhere to put a cleaned corpus. It does not: cleaning emits a segment index over
+the bars that are already there (ADR-0018), so its entire output is three small files in the
+`axiom-raw` dataset v0.1 created. The table above still gains no row.
+
+The derived total-return tier is the one thing that *could* have needed space, and under the
+measured adjustment verdict it needs none — `tr_close` equals `close`, so `axiom derive tr` writes
+a coverage manifest and no bar files (ADR-0019).
+
 ## Layout inside `axiom-raw`
 
 ```
@@ -135,9 +146,24 @@ raw/yahoo/adjustments/{A-Z0-9_}/{TICKER}.parquet        # v0.2, events not bars
 registry/registry.parquet                               # v0.2
 registry/summary.md
 registry/bad_sidecars.json                              # only when something would not parse
+clean/v{clean_version}/segments.parquet                 # v0.3, the segment index
+clean/v{clean_version}/dropstats.parquet                # v0.3, per-series per-rule accounting
+clean/v{clean_version}/run_manifest.json                # v0.3, config hash, coverage, wall time
+clean/v{clean_version}/summary.md                        # v0.3, the rendered drop-stats report
+derived/tr_close/manifest.json                          # v0.3, verdict + per-ticker tr_available
+derived/tr_close/us/1d/{A-Z0-9_}/{TICKER}.parquet       # v0.3, only if the verdict needs it
 staging/stooq/                                          # transient, see below
 manifests/pulls/{pull_run_id}.json
 ```
+
+**`clean/` is versioned by `clean_version`, not by run.** Two clean runs at the same config
+overwrite each other, which is correct — they produce identical bytes. Two runs at *different*
+configs must not share a directory, and the version bump is how that is arranged; the config hash
+inside every row is how a mistake is caught if it is not.
+
+**Nothing under `clean/` or `derived/` has a sidecar, and nothing under them is ever cleaned.**
+They are outputs, and `axiom clean run` filters them out of its own input by path prefix as well
+as by source.
 
 Every `.parquet` has a `.parquet.manifest.json` sidecar beside it. The sidecars are the pull's
 only resume state (ADR-0010) and the registry is built over them rather than instead of them.
