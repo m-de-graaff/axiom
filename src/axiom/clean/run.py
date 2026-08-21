@@ -17,6 +17,7 @@ Two guards make a rerun trustworthy rather than merely repeatable:
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -34,6 +35,7 @@ from axiom.clean.engine import (
     segments_table,
     verify_corpus_invariants,
 )
+from axiom.config.hashing import SHORT_LEN, canonical_json
 
 log = logging.getLogger("axiom.clean")
 
@@ -93,6 +95,14 @@ class CleanRun:
     kept_bars: int = 0
     reused_artifacts: int = 0
     wall_seconds: float = 0.0
+    #: Content identity of the segment table, filled by :func:`write_outputs`.
+    #:
+    #: Taken over the rows rather than the Parquet bytes, exactly as `registry_hash` is: two
+    #: writers with different pyarrow versions should agree that the corpus is unchanged, and
+    #: they will not agree on compression block boundaries. This is what the v0.3 exit gate's
+    #: determinism check compares, and it is readable straight out of the run manifest instead
+    #: of by downloading two tables and diffing them.
+    segments_hash: str = ""
 
     @property
     def dropped_bars(self) -> int:
@@ -101,7 +111,8 @@ class CleanRun:
     def line(self) -> str:
         pct = 100.0 * self.dropped_bars / self.total_bars if self.total_bars else 0.0
         return (
-            f"clean v{self.clean_version} ({self.clean_config_hash}): {self.ok} series, "
+            f"clean v{self.clean_version} (config {self.clean_config_hash}, segments "
+            f"{self.segments_hash or '-'}): {self.ok} series, "
             f"{len(self.segments)} segments, {self.kept_bars}/{self.total_bars} bars kept "
             f"({pct:.2f}% dropped), {self.failed} failed"
         )
@@ -112,6 +123,7 @@ class CleanRun:
                 {
                     "clean_version": self.clean_version,
                     "clean_config_hash": self.clean_config_hash,
+                    "segments_hash": self.segments_hash,
                     "registry_hash": self.registry_hash,
                     "incremental": self.incremental,
                     "series_ok": self.ok,
@@ -367,6 +379,7 @@ def write_outputs(run: CleanRun) -> dict[str, bytes]:
     problems = verify_corpus_invariants(segments)
     if problems:
         raise ValueError("the segment index breaks its own invariants: " + "; ".join(problems))
+    run.segments_hash = segments_hash(segments)
 
     paths = clean_paths(run.clean_version)
     return {
@@ -374,6 +387,13 @@ def write_outputs(run: CleanRun) -> dict[str, bytes]:
         paths["dropstats"]: _parquet(dropstats_table(run.dropstats)),
         paths["manifest"]: run.to_json().encode("utf-8"),
     }
+
+
+def segments_hash(segments: pa.Table) -> str:
+    """Content identity of a segment index. Two runs of the same config must agree on it."""
+    return hashlib.sha256(canonical_json(segments.to_pylist()).encode("utf-8")).hexdigest()[
+        :SHORT_LEN
+    ]
 
 
 def _parquet(table: pa.Table) -> bytes:

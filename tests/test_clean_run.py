@@ -245,14 +245,21 @@ def test_a_full_run_produces_three_files_that_read_back(tier) -> None:
 
 
 def test_a_second_run_is_byte_identical(tier) -> None:
-    """Determinism over the assembled tables, not just over one series."""
+    """Determinism over the assembled tables, not just over one series.
+
+    The v0.3 exit gate asks for exactly this at corpus scale, and reads it off `segments_hash` in
+    the run manifest rather than by downloading two tables and diffing them.
+    """
     store, manifests = tier
     cfg = config()
-    first = write_outputs(run_over(store, manifests, cfg))
-    second = write_outputs(run_over(store, manifests, cfg))
+    run_a = run_over(store, manifests, cfg)
+    run_b = run_over(store, manifests, cfg)
+    first, second = write_outputs(run_a), write_outputs(run_b)
     paths = clean_paths(cfg.clean_version)
     assert first[paths["segments"]] == second[paths["segments"]]
     assert first[paths["dropstats"]] == second[paths["dropstats"]]
+    assert run_a.segments_hash == run_b.segments_hash != ""
+    assert json.loads(first[paths["manifest"]])["segments_hash"] == run_a.segments_hash
 
 
 def test_an_unreadable_artifact_is_reported_not_skipped(tier) -> None:
