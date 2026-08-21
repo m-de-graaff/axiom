@@ -19,8 +19,10 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -76,9 +78,16 @@ class EquityUniverse(BaseModel):
     version: int = 1
     criteria: EquityCriteria
     symbols: list[str]
-    #: Candidates that passed the history filter but lost the ranking cut. Recorded as a count,
-    #: because "3000 of 3000 candidates" and "3000 of 14000" describe very different universes.
+    #: Candidates that passed the history filter. Recorded because "3000 of 3000" and
+    #: "3000 of 14000" describe very different universes -- and because an earlier version set
+    #: this *after* the ranking cut, so a run that lost 90% of its candidates to rate limiting
+    #: reported "978 of 978 kept".
     candidates_considered: int = 0
+    #: Candidates whose dollar volume could not be measured. Must be zero for this file to mean
+    #: what it says: a non-zero value is data loss wearing a filter's clothes.
+    candidates_unrankable: int = 0
+    #: Candidates measured and found to have no trading in the window. A real exclusion.
+    candidates_zero_volume: int = 0
     universe_hash: str = ""
 
     def compute_hash(self) -> str:
@@ -182,36 +191,101 @@ def median_dollar_volume(table: pa.Table, *, window: int = RANKING_WINDOW_DAYS) 
     return float(np.median(finite)) if finite.size else 0.0
 
 
+@dataclass
+class Ranking:
+    """What ranking the candidates produced, including what it could not measure.
+
+    ``unrankable`` is the field that matters. An earlier version returned 0.0 for a ticker whose
+    download failed, which the ``> 0`` cut then silently discarded -- so a Hugging Face 429
+    became "this stock has no volume" and a run that measured 978 of roughly 9 000 candidates
+    reported them all as kept. A failure must never be representable as a ranking.
+    """
+
+    ranked: list[tuple[str, float]] = field(default_factory=list)
+    #: Measured, and genuinely zero: no trading in the window. Excluded, correctly.
+    zero_volume: list[str] = field(default_factory=list)
+    #: Not measured. Excluding these silently is data loss wearing a filter's clothes.
+    unrankable: list[str] = field(default_factory=list)
+
+    @property
+    def attempted(self) -> int:
+        return len(self.ranked) + len(self.zero_volume) + len(self.unrankable)
+
+    @property
+    def unrankable_fraction(self) -> float:
+        return len(self.unrankable) / self.attempted if self.attempted else 0.0
+
+
+def read_dollar_volume(
+    store: RawStore,
+    candidate: Candidate,
+    *,
+    window: int = RANKING_WINDOW_DAYS,
+    attempts: int = 4,
+    sleep: Callable[[float], None] = time.sleep,
+) -> float | None:
+    """One candidate's median dollar volume, or ``None`` when it could not be measured.
+
+    Retries because the Hub rate-limits reads as readily as it rate-limits commits, and a 429 on
+    ticker nine thousand is not a fact about that ticker. Returning ``None`` rather than 0.0 is
+    the point: the caller must be unable to confuse "did not trade" with "did not answer".
+    """
+    for attempt in range(attempts):
+        try:
+            data = store.get(candidate.artifact_path)
+            if data is None:
+                return None
+            table = pq.read_table(io.BytesIO(data), columns=["close", "volume"])
+            return median_dollar_volume(table, window=window)
+        except Exception as exc:
+            if attempt + 1 == attempts:
+                log.warning(
+                    "could not rank %s after %d attempts: %s", candidate.symbol, attempts, exc
+                )
+                return None
+            sleep(0.5 * (2**attempt))
+    return None
+
+
 def rank_candidates(
     store: RawStore,
     candidates: list[Candidate],
     *,
     window: int = RANKING_WINDOW_DAYS,
-    concurrency: int = 16,
-) -> list[tuple[str, float]]:
+    concurrency: int = 8,
+    sleep: Callable[[float], None] = time.sleep,
+) -> Ranking:
     """Download each candidate's close and volume columns and rank by median dollar volume.
 
     Ties break on the symbol, so the ordering is total. Two tickers with identical median dollar
     volume is unlikely and "unlikely" is exactly what makes a supposedly reproducible file differ
     between two runs a year apart.
+
+    Concurrency is deliberately lower than the registry's. This reads a whole Parquet per
+    candidate rather than a few hundred bytes of JSON, across thousands of them, and the Hub
+    starts refusing well before the thread pool notices.
     """
 
-    def measure(candidate: Candidate) -> tuple[str, float]:
-        try:
-            data = store.get(candidate.artifact_path)
-            if data is None:
-                return candidate.symbol, 0.0
-            table = pq.read_table(io.BytesIO(data), columns=["close", "volume"])
-            return candidate.symbol, median_dollar_volume(table, window=window)
-        except Exception as exc:
-            log.warning("could not rank %s: %s", candidate.symbol, exc)
-            return candidate.symbol, 0.0
+    def measure(candidate: Candidate) -> tuple[str, float | None]:
+        return candidate.symbol, read_dollar_volume(store, candidate, window=window, sleep=sleep)
 
     with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="rank") as pool:
         measured = list(pool.map(measure, candidates))
 
-    ranked = [(symbol, value) for symbol, value in measured if value > 0.0]
-    return sorted(ranked, key=lambda pair: (-pair[1], pair[0]))
+    result = Ranking()
+    for symbol, value in measured:
+        if value is None:
+            result.unrankable.append(symbol)
+        elif value > 0.0:
+            result.ranked.append((symbol, value))
+        else:
+            result.zero_volume.append(symbol)
+    result.ranked.sort(key=lambda pair: (-pair[1], pair[0]))
+    return result
+
+
+class IncompleteRanking(RuntimeError):
+    """Too many candidates could not be measured for the result to be a universe."""
 
 
 def build_equity_universe(
@@ -223,12 +297,35 @@ def build_equity_universe(
     min_history_years: int = MIN_HISTORY_YEARS,
     top_n: int = TOP_N,
     window: int = RANKING_WINDOW_DAYS,
-    concurrency: int = 16,
+    concurrency: int = 8,
+    max_unrankable_fraction: float = 0.01,
 ) -> EquityUniverse:
-    """Filter by history, rank by dollar volume, cut to the top N."""
+    """Filter by history, rank by dollar volume, cut to the top N.
+
+    Refuses to produce a universe when too much of the candidate pool could not be measured. A
+    universe is a committed, hashed definition of what the model trains on; one built from a
+    tenth of the market because the Hub was rate-limiting reads is not a smaller universe, it is
+    a wrong one -- and a month later it would be indistinguishable from a correct one.
+    """
     candidates = candidates_from_registry(registry, min_history_years=min_history_years)
-    ranked = rank_candidates(store, candidates, window=window, concurrency=concurrency)
-    log.info("%d candidates ranked, keeping the top %d", len(ranked), top_n)
+    ranking = rank_candidates(store, candidates, window=window, concurrency=concurrency)
+
+    log.info(
+        "%d candidates, %d ranked, %d with no volume, %d unrankable; keeping the top %d",
+        len(candidates),
+        len(ranking.ranked),
+        len(ranking.zero_volume),
+        len(ranking.unrankable),
+        top_n,
+    )
+    if ranking.unrankable_fraction > max_unrankable_fraction:
+        raise IncompleteRanking(
+            f"{len(ranking.unrankable)} of {ranking.attempted} candidates could not be measured "
+            f"({ranking.unrankable_fraction:.1%}, over the {max_unrankable_fraction:.0%} "
+            "tolerance). This is almost always the Hub rate-limiting reads; re-run, and lower "
+            "--concurrency if it persists. Refusing to emit a universe built on the fraction "
+            "that answered."
+        )
 
     universe = EquityUniverse(
         criteria=EquityCriteria(
@@ -238,7 +335,9 @@ def build_equity_universe(
             generated_at=generated_at,
             registry_hash=registry_hash,
         ),
-        symbols=[symbol for symbol, _ in ranked[:top_n]],
-        candidates_considered=len(ranked),
+        symbols=[symbol for symbol, _ in ranking.ranked[:top_n]],
+        candidates_considered=len(candidates),
+        candidates_unrankable=len(ranking.unrankable),
+        candidates_zero_volume=len(ranking.zero_volume),
     )
     return universe.with_hash()

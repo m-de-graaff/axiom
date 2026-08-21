@@ -159,7 +159,7 @@ def test_ranking_is_descending_by_dollar_volume():
         }
     )
     candidates = [Candidate("AAA", "a.parquet", 2000.0), Candidate("BBB", "b.parquet", 2000.0)]
-    assert [s for s, _ in rank_candidates(store, candidates)] == ["BBB", "AAA"]
+    assert [s for s, _ in rank_candidates(store, candidates).ranked] == ["BBB", "AAA"]
 
 
 def test_ties_break_on_the_symbol_so_the_order_is_total():
@@ -168,16 +168,62 @@ def test_ties_break_on_the_symbol_so_the_order_is_total():
         {"a.parquet": ([10.0] * 300, [100.0] * 300), "b.parquet": ([10.0] * 300, [100.0] * 300)}
     )
     candidates = [Candidate("ZZZ", "b.parquet", 2000.0), Candidate("AAA", "a.parquet", 2000.0)]
-    assert [s for s, _ in rank_candidates(store, candidates)] == ["AAA", "ZZZ"]
+    assert [s for s, _ in rank_candidates(store, candidates).ranked] == ["AAA", "ZZZ"]
 
 
-def test_a_series_that_cannot_be_read_drops_out_rather_than_failing_the_build():
+def test_a_series_that_cannot_be_read_is_unrankable_not_worthless():
+    """The bug this replaced: a failed read returned 0.0, the `> 0` cut discarded it, and a Hub
+    429 became 'this stock has no volume'. One real run measured 978 of ~9 000 candidates and
+    reported all 978 as kept."""
     store = FakeStore({"a.parquet": ([10.0] * 300, [100.0] * 300)})
     candidates = [
         Candidate("AAA", "a.parquet", 2000.0),
         Candidate("GONE", "missing.parquet", 2000.0),
     ]
-    assert [s for s, _ in rank_candidates(store, candidates)] == ["AAA"]
+    ranking = rank_candidates(store, candidates, sleep=lambda _: None)
+    assert [s for s, _ in ranking.ranked] == ["AAA"]
+    assert ranking.unrankable == ["GONE"]
+    assert ranking.zero_volume == []
+
+
+def test_a_genuinely_untraded_series_is_zero_volume_not_unrankable():
+    """The other half of the distinction: measured, and the answer was nothing."""
+    store = FakeStore({"a.parquet": ([10.0] * 300, [0.0] * 300)})
+    ranking = rank_candidates(store, [Candidate("AAA", "a.parquet", 2000.0)], sleep=lambda _: None)
+    assert ranking.zero_volume == ["AAA"]
+    assert ranking.unrankable == []
+
+
+def test_a_universe_is_refused_when_too_much_could_not_be_measured():
+    """A universe built on the tenth of the market that answered is not a smaller universe."""
+    from axiom.universe.equities import IncompleteRanking
+
+    table = registry_of(*[equity(f"S{i:04d}", days=3000) for i in range(50)])
+    store = FakeStore({"raw/stooq/us/1d/S0000.parquet": ([10.0] * 300, [100.0] * 300)})
+    with pytest.raises(IncompleteRanking, match="could not be measured"):
+        build_equity_universe(
+            store, table, registry_hash="r", generated_at="2026-08-21", top_n=3000
+        )
+
+
+def test_a_transient_read_error_is_retried_before_being_called_unrankable():
+    """The Hub rate-limits reads; a 429 on candidate nine thousand is not a fact about it."""
+    from axiom.universe.equities import read_dollar_volume
+
+    class FlakyStore(FakeStore):
+        def __init__(self, series, fail_times):
+            super().__init__(series)
+            self.remaining = fail_times
+
+        def get(self, artifact_path):
+            if self.remaining:
+                self.remaining -= 1
+                raise RuntimeError("429 Too Many Requests")
+            return super().get(artifact_path)
+
+    store = FlakyStore({"a.parquet": ([10.0] * 300, [100.0] * 300)}, fail_times=2)
+    value = read_dollar_volume(store, Candidate("AAA", "a.parquet", 2000.0), sleep=lambda _: None)
+    assert value == 1000.0
 
 
 def test_only_candidates_are_ever_downloaded():
@@ -186,6 +232,13 @@ def test_only_candidates_are_ever_downloaded():
     store = FakeStore({"raw/stooq/us/1d/OLD.parquet": ([10.0] * 300, [100.0] * 300)})
     build_equity_universe(store, table, registry_hash="abc123", generated_at="2026-08-20", top_n=10)
     assert store.reads == ["raw/stooq/us/1d/OLD.parquet"]
+
+
+def test_the_file_records_what_could_not_be_measured():
+    """Zero here is what makes the universe mean what it says."""
+    universe = built()
+    assert universe.candidates_unrankable == 0
+    assert universe.candidates_considered == 2
 
 
 # --- the built file ---------------------------------------------------------------------------
