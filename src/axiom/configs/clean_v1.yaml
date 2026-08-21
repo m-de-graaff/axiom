@@ -9,6 +9,7 @@ clean_version: 1
 # Stage order. Part of the hash, and locked by a test that constructs a series whose segments
 # differ under any other ordering (ADR-0018).
 stage_order:
+  - session_filter
   - gap
   - jump
   - illiquid
@@ -62,6 +63,34 @@ sessions:
     # rule degrades to "Saturday and Sunday are expected", which is what the vendor publishes.
     friday_close_hour_utc: 20
     sunday_open_hour_utc: 23
+
+  # Dukascopy's commodity and index CFDs. Same week as FX, plus a daily settlement break.
+  #
+  # Measured, not assumed. `axiom clean probe` over all six commodity instruments found the same
+  # signature in every one: thousands of gaps exactly one slot wide, concentrated in UTC hours 21
+  # and 22, on every weekday. XAUUSD alone had 2,369 one-hour gaps at 21:00-22:00. No market
+  # outage looks like that; a settlement break does. Brent (BCOUSD) runs longer, with its holes
+  # spread over 21h-00h, so the window covers 21:00 to 01:00 for all of them.
+  #
+  # The window is only consulted by the gap rule. Bars inside it are kept -- gold really does
+  # print some -- because deleting a real bar to satisfy a window is worse than tolerating a gap.
+  # The cost of the wider window is that a genuine outage between 23:00 and 01:00 goes uncut,
+  # which is the safe direction.
+  24x5-cfd:
+    kind: weekend
+    friday_close_hour_utc: 20
+    sunday_open_hour_utc: 23
+    break_start_hour_utc: 21
+    break_end_hour_utc: 1
+
   XNYS-regular:
     kind: exchange_calendar
     calendar: XNYS
+
+# The session a file declares can be wrong, and re-pulling four million bars to fix a label is the
+# expensive way to correct a one-line classification error. v0.2 stamped every Dukascopy artifact
+# `24x5`; the commodity CFDs are not that, and the first full clean run lost 100% of Brent,
+# copper, natural gas and silver to it. Keyed `{source}/{asset_class}`.
+session_overrides:
+  dukascopy/commodity: 24x5-cfd
+  dukascopy/index: 24x5-cfd

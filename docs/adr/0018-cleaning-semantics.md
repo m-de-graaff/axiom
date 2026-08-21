@@ -30,11 +30,12 @@ A segment row is bound to the exact bytes it was derived from: it carries `raw_a
 alongside `clean_config_hash` and `clean_version`. A raw file whose hash changed invalidates its
 segments, and the clean run detects that rather than silently serving stale intervals.
 
-### The five stages, in this order
+### The six stages, in this order
 
 The order is part of the config hash, and a test locks it by constructing a series whose segments
 differ under any other ordering.
 
+0. **Session filter.** Drop bars that are not part of the session at all.
 1. **Gap partition.** Split wherever the timestamp grid skips a step that the series' session says
    should have been there.
 2. **Jump partition.** Split wherever `|open_t / close_{t−1} − 1| > θ_jump(freq)`.
@@ -45,6 +46,29 @@ differ under any other ordering.
 Partitioning before excision is what makes the run-length rules mean what they say. A run of zero
 volume interrupted by a two-week outage is two runs, not one, and counting it as one would excise
 bars on the strength of an absence.
+
+The session filter runs before everything, and it was added after the first full corpus run, which
+measured what happens without it — see **Amendments** below.
+
+### Session filter (stage 0)
+
+A bar outside the session is not a bar of the series. Exactly one case qualifies: an **intraday
+bar inside a 24x5 market's weekend close that traded nothing**. Dukascopy pads some eras'
+weekends with synthetic flat zero-volume bars carrying the Friday close forward; ADR-0010 recorded
+them rather than deleting them, and left the decision here.
+
+**Both halves of the test are load-bearing.** The weekend window is deliberately wider than any
+single DST regime, so it also covers hours the market really did trade under the other one —
+Dukascopy's Friday close has been 21:00 and 22:00 UTC in different eras. Deleting on the window
+alone throws away real Friday-evening bars, which is the worse error. A bar that traded is a bar,
+wherever it lands. The accepted cost is a genuinely untraded real bar just inside the window,
+which nothing in the file distinguishes from padding.
+
+**The read contract this creates.** A segment's `[start_ts, end_ts]` may span timestamps the
+filter removed, so reading a segment means reading the bars in that range **that pass
+`axiom.clean.calendars.in_session_mask`** — the same predicate the cleaner applied, with the
+`session_id` that is already a column on every segment row. `n_bars` counts in-session bars.
+Nothing else in the index changes.
 
 ### Jump rule
 
@@ -69,10 +93,12 @@ unexpected for the series' session** (`session_id`, ADR-0014):
 
 - **`24x7`** (crypto): strict grid. Every step should hold a bar; any missing one is a boundary,
   because for a 24/7 exchange an absence is an outage.
-- **`24x5`** (FX, commodities, index CFDs): the weekend window is expected and never a boundary.
-  The window is Friday close to Sunday open, with tolerance for European DST — Dukascopy's week
-  has opened at 19:00, 21:00 and 22:00 UTC across its history. Any gap that is not the weekend is
-  a boundary.
+- **`24x5`** (FX): the weekend window is expected and never a boundary. The window is Friday close
+  to Sunday open, with tolerance for European DST — Dukascopy's week has opened at 19:00, 21:00
+  and 22:00 UTC across its history. Any gap that is not the weekend is a boundary.
+- **`24x5-cfd`** (commodity and index CFDs): the same week, plus a **daily settlement break**.
+  Measured, not assumed — see **Amendments**. Bars inside the break are kept; only missing ones
+  are excused.
 - **`XNYS-regular`** (US equities, 1d): weekends and NYSE holidays are expected, resolved through
   the `exchange_calendars` package's XNYS calendar. Any non-calendar missing session — a trading
   suspension, a delisting hole, a vendor omission — is a boundary. The package is pinned; it was
@@ -145,3 +171,38 @@ data.
 
 **Impute missing bars.** Rejected in ADR-0010 and rejected again here. A filled bar is a fact the
 market did not produce.
+
+
+---
+
+## Amendments
+
+### 2026-08-21 — session filter and `24x5-cfd`, after the first full corpus run
+
+The first clean over all 13,077 artifacts kept 89.7 % of bars and raised five red flags. Both
+causes turned out to be **definition** errors rather than threshold errors, and `axiom clean
+probe` measured each one rather than arguing about it.
+
+**Commodity CFDs are not `24x5`.** v0.2 stamped every Dukascopy artifact with that session. The
+probe found the same signature in all six commodity instruments: thousands of gaps exactly one
+slot wide, concentrated in UTC hours 21 and 22, on every weekday — XAUUSD alone had 2,369. No
+market outage looks like that; a settlement break does. Brent's holes spread over 21h–00h, so the
+declared window covers 21:00 to 01:00 for all of them. Left undeclared, this cost **100 % of
+Brent, copper, natural gas and silver, and 54 % of gold** — each instrument shattered into
+one-day fragments that `min_bars` then dropped.
+
+Fixed with a `session_overrides` map in the clean config rather than a re-pull. `session_id` is
+stamped into the Parquet at pull time and a mistake there is only visible once cleaning runs;
+re-pulling four million bars to correct a label would be the expensive way to fix a one-line
+classification error.
+
+**Weekend padding was being excised as an illiquid run.** 8,177 of EURUSD's 8,235 zero-volume
+bars sit inside the weekend window. The illiquid rule excised them — correctly — and the excision
+partitioned the series at every padded weekend, leaving 120-bar weeks that `min_bars = 256` then
+discarded wholesale. EURUSD lost 20.8 % of its history, USDJPY 21.4 %. The padding is not market
+data and had to go; the *boundary* was the error, because the hole it leaves is the weekend the
+session already expects. Hence stage 0, which removes them before any rule can see them.
+
+Both changes moved the config hash, which invalidated every segment from the first run. That is
+the mechanism working: `--incremental` refuses across a config change, and the corpus was
+re-cleaned in full.

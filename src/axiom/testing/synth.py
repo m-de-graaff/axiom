@@ -440,6 +440,69 @@ def with_limit_lock(series: SynthSeries, at: int, n: int) -> SynthSeries:
     return replace(out, notes=(*out.notes[:-1], f"limit lock of {n} bar(s) from row {at}"))
 
 
+def with_weekend_padding(series: SynthSeries) -> SynthSeries:
+    """Fill a 24x5 series' weekends with the vendor's synthetic flat bars.
+
+    Dukascopy does this in some eras: zero volume, all four prices carrying the Friday close
+    forward. They are not market data, and ADR-0010 recorded them rather than deleting them so
+    that v0.3 could decide. **No cut expected** -- dropping them must leave the weekend gap the
+    session already expects, not a boundary.
+    """
+    if series.session_id != "24x5":
+        raise ValueError("only a 24x5 series has a weekend to pad")
+    step = grid_step_ms(series.frequency)
+    if step >= MS_PER_DAY:
+        raise ValueError("daily bars are stamped 00:00 UTC; there is no weekend to fill")
+
+    ts = series.ts
+    close = series.column("close")
+    filler_ts: list[int] = []
+    filler_price: list[float] = []
+    for i in range(len(ts) - 1):
+        for slot in range(int(ts[i]) + step, int(ts[i + 1]), step):
+            filler_ts.append(slot)
+            filler_price.append(float(close[i]))
+    if not filler_ts:
+        raise ValueError("this series has no gaps to pad")
+
+    merged_ts = np.concatenate((ts, np.array(filler_ts, dtype=np.int64)))
+    order = np.argsort(merged_ts, kind="stable")
+    flat = np.array(filler_price, dtype=np.float64)
+    zeros = np.zeros(len(filler_ts), dtype=np.float64)
+
+    def merge(column: str, padded: np.ndarray) -> np.ndarray:
+        return np.concatenate((series.column(column), padded))[order]
+
+    table = _table(
+        merged_ts[order],
+        merge("open", flat),
+        merge("high", flat),
+        merge("low", flat),
+        merge("close", flat),
+        merge("volume", zeros),
+    )
+    note = f"weekend padding: {len(filler_ts)} synthetic flat zero-volume bars, no cut expected"
+    return replace(series, table=table, notes=(*series.notes, note))
+
+
+def with_daily_break(series: SynthSeries, start_hour: int, end_hour: int) -> SynthSeries:
+    """Remove the bars in a daily settlement break, the way a CFD feed simply has none.
+
+    **No cut expected** once the session declares the break. Every commodity instrument in the
+    corpus shows this shape: thousands of one-slot holes, all in the same hours of the day.
+    """
+    ts = series.ts
+    hour = (ts % MS_PER_DAY) // MS_PER_HOUR
+    inside = (
+        (hour >= start_hour) & (hour < end_hour)
+        if start_hour < end_hour
+        else ((hour >= start_hour) | (hour < end_hour))
+    )
+    out = _drop_rows(series, ~inside)
+    note = f"daily break {start_hour:02d}:00-{end_hour:02d}:00 UTC removed, no cut expected"
+    return replace(out, notes=(*out.notes, note))
+
+
 __all__ = [
     "DEFAULT_START_MS",
     "SynthSeries",
@@ -448,6 +511,7 @@ __all__ = [
     "truncate_tail",
     "walk",
     "with_adjusted_split",
+    "with_daily_break",
     "with_dst_weekend",
     "with_flash_crash",
     "with_gap",
@@ -457,4 +521,5 @@ __all__ = [
     "with_split",
     "with_stagnant",
     "with_suspension",
+    "with_weekend_padding",
 ]

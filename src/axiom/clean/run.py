@@ -208,7 +208,7 @@ def clean_artifact(data: bytes, ref: ArtifactRef, config: CleanConfig):
         asset_class=ref.asset_class,
         symbol=ref.symbol,
         frequency=ref.frequency,
-        session_id=session_id_for(table, ref),
+        session_id=config.session_id_for(ref.source, ref.asset_class, session_id_for(table, ref)),
         artifact_path=ref.artifact_path,
         raw_artifact_sha256=ref.artifact_sha256,
     )

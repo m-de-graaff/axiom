@@ -24,7 +24,14 @@ from axiom.config.settings import resolve_config_path
 #:
 #: Partitioning runs before excision so that a run of dead bars interrupted by an outage counts
 #: as two runs. Counting it as one would excise bars on the strength of an absence (ADR-0018).
-CANONICAL_STAGE_ORDER: tuple[str, ...] = ("gap", "jump", "illiquid", "stagnant", "min_length")
+CANONICAL_STAGE_ORDER: tuple[str, ...] = (
+    "session_filter",
+    "gap",
+    "jump",
+    "illiquid",
+    "stagnant",
+    "min_length",
+)
 
 #: Session kinds a config may declare, matching the `session_id` values in the bar schema.
 SESSION_KINDS = frozenset({"strict", "weekend", "exchange_calendar"})
@@ -56,8 +63,19 @@ class SessionRule(BaseModel):
     friday_close_hour_utc: int = Field(default=20, ge=0, le=23)
     #: `weekend` only: the UTC hour before which Sunday counts as shut.
     sunday_open_hour_utc: int = Field(default=23, ge=0, le=24)
+    #: `weekend` only: a daily settlement break, `[start, end)` in UTC hours, wrapping midnight
+    #: when end <= start. -1 on either means the market runs straight through the day.
+    #:
+    #: Only the **gap** rule consults this. Bars inside the break are kept: most CFDs do print
+    #: some, and deleting a real bar to satisfy a window would be worse than tolerating a gap.
+    break_start_hour_utc: int = Field(default=-1, ge=-1, le=23)
+    break_end_hour_utc: int = Field(default=-1, ge=-1, le=23)
     #: `exchange_calendar` only: the `exchange_calendars` code, e.g. `XNYS`.
     calendar: str = ""
+
+    @property
+    def has_break(self) -> bool:
+        return self.break_start_hour_utc >= 0 and self.break_end_hour_utc >= 0
 
     def model_post_init(self, _: Any) -> None:
         if self.kind not in SESSION_KINDS:
@@ -78,6 +96,16 @@ class CleanConfig(BaseModel):
     illiquid_eps: float = Field(ge=0.0)
     frequencies: dict[str, FrequencyRule]
     sessions: dict[str, SessionRule]
+    #: `"{source}/{asset_class}" -> session_id`, overriding what a file's own metadata declares.
+    #:
+    #: Needed because `session_id` is stamped into the Parquet at pull time and a mistake there
+    #: is only visible once cleaning runs. Re-pulling four million bars to correct a label would
+    #: be the expensive way to fix a one-line classification error.
+    session_overrides: dict[str, str] = Field(default_factory=dict)
+
+    def session_id_for(self, source: str, asset_class: str, declared: str) -> str:
+        """The session to clean under: an override if one applies, else what the file says."""
+        return self.session_overrides.get(f"{source}/{asset_class}", declared)
 
     def model_post_init(self, _: Any) -> None:
         if tuple(self.stage_order) != CANONICAL_STAGE_ORDER:

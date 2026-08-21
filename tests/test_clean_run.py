@@ -17,7 +17,7 @@ import pytest
 
 from axiom.adjust.derive import TR_MANIFEST_PATH, derive_tr
 from axiom.adjust.policy import POLICY_SPLIT_AND_DIVIDEND, POLICY_SPLIT_ONLY
-from axiom.clean.config import load_clean_config
+from axiom.clean.config import CANONICAL_STAGE_ORDER, load_clean_config
 from axiom.clean.reports import (
     clean_summary_markdown,
     drop_rates,
@@ -346,7 +346,7 @@ def test_post_clean_views_render(tier) -> None:
     assert sum(g["windows_512"] for g in usable) == 0
 
     rates = drop_rates(dropstats)
-    assert {r["rule"] for r in rates} == {"gap", "jump", "illiquid", "stagnant", "min_length"}
+    assert {r["rule"] for r in rates} == set(CANONICAL_STAGE_ORDER)
     stagnant = [
         r for r in rates if r["source"] == "stooq" and r["rule"] in ("stagnant", "illiquid")
     ]

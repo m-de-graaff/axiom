@@ -160,6 +160,67 @@ def test_dst_shifted_weekend_is_not_a_boundary() -> None:
     assert len(result.segments) == 1, "a DST shift partitioned an FX series"
 
 
+def test_weekend_padding_is_dropped_without_partitioning_the_series() -> None:
+    """The measured failure from the first full corpus run, as a test.
+
+    Dukascopy pads some eras' weekends with synthetic flat zero-volume bars. Left to the illiquid
+    rule they are a dead run, excised, and the excision splits the series at every weekend --
+    which at 1h leaves 120-bar weeks that `min_bars = 256` then throws away wholesale. EURUSD lost
+    20.8 % of its history that way. Dropping them as out-of-session, before any rule sees them,
+    leaves the weekend gap the session already expects.
+    """
+    base = synth.walk("1h", 900, seed=31, session_id="24x5")
+    padded = synth.with_weekend_padding(base)
+    assert padded.table.num_rows > base.table.num_rows
+
+    result = clean(padded, config(**{"1h": 4}))
+    assert len(result.segments) == 1, "the padding partitioned the series"
+    assert result.total_bars == padded.table.num_rows
+    assert result.kept_bars == base.table.num_rows
+    dropstats = {row["rule"]: row for row in result.dropstats}
+    assert dropstats["session_filter"]["bars_dropped"] == (
+        padded.table.num_rows - base.table.num_rows
+    )
+    assert dropstats["illiquid"]["bars_dropped"] == 0, "a rule saw a bar it should never have seen"
+
+
+def test_a_declared_daily_break_is_not_a_boundary() -> None:
+    """Every commodity CFD in the corpus has one, and none of them declared it."""
+    base = synth.walk("1h", 900, seed=32, session_id="24x5")
+    broken = synth.with_daily_break(base, 21, 1)
+
+    cfg = config(**{"1h": 4})
+    plain = clean_series(broken.table, identity(broken), cfg)
+    assert len(plain.segments) > 20, "without the break declared this should shatter"
+
+    aware = clean_series(broken.table, replace(identity(broken), session_id="24x5-cfd"), cfg)
+    assert len(aware.segments) == 1, "the declared break still partitioned the series"
+    assert aware.kept_bars == broken.table.num_rows
+
+
+def test_a_bar_that_traded_is_never_deleted_for_being_in_the_weekend_window() -> None:
+    """The window is wider than any one DST regime, so it covers hours that really do trade.
+
+    Dukascopy's Friday close has been 21:00 and 22:00 UTC in different eras. Deleting on the
+    window alone would throw away real Friday-evening bars, which is the worse error -- so the
+    filter also requires the bar to have traded nothing.
+    """
+    for session_id in ("24x5", "24x5-cfd"):
+        series = synth.walk("1h", 600, seed=33, session_id="24x5")
+        result = clean_series(
+            series.table, replace(identity(series), session_id=session_id), config(**{"1h": 4})
+        )
+        assert result.kept_bars == series.table.num_rows, session_id
+        assert result.total_bars == series.table.num_rows
+
+
+def test_the_session_override_beats_what_the_file_declares() -> None:
+    cfg = load_clean_config("clean_v1")
+    assert cfg.session_id_for("dukascopy", "commodity", "24x5") == "24x5-cfd"
+    assert cfg.session_id_for("dukascopy", "fx", "24x5") == "24x5"
+    assert cfg.session_id_for("binance_vision", "crypto", "24x7") == "24x7"
+
+
 def test_missing_crypto_hour_is_a_boundary() -> None:
     series = synth.with_gap(synth.walk("1h", 300, seed=7), at=100, n_bars=1)
     result = clean(series)
@@ -273,9 +334,11 @@ def test_stage_order_changes_the_answer() -> None:
         "session": cfg.session_for("24x7"),
         "frequency": "1h",
     }
-    canonical, _ = run_stages(columns, stage_order=CANONICAL_STAGE_ORDER, **kwargs)
-    swapped, _ = run_stages(
-        columns, stage_order=("illiquid", "gap", "jump", "stagnant", "min_length"), **kwargs
+    canonical, _, _ = run_stages(columns, stage_order=CANONICAL_STAGE_ORDER, **kwargs)
+    swapped, _, _ = run_stages(
+        columns,
+        stage_order=("session_filter", "illiquid", "gap", "jump", "stagnant", "min_length"),
+        **kwargs,
     )
     assert _spans(canonical) != _spans(swapped), (
         "the two stage orders produced identical segments, so this series does not lock the order"
@@ -449,7 +512,7 @@ def test_tables_build_and_pass_the_corpus_invariants() -> None:
     segments = segments_table(rows)
     assert segments.num_rows == 6
     assert verify_corpus_invariants(segments) == []
-    assert dropstats_table(drops).num_rows == 15
+    assert dropstats_table(drops).num_rows == 18
 
 
 def test_segment_ids_separate_the_same_ticker_on_two_markets() -> None:

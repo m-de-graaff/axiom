@@ -50,6 +50,63 @@ def calendar_bounds_days(calendar: str) -> tuple[int, int]:
     return int(days[0]), int(days[-1])
 
 
+def _weekend_shut(slots: np.ndarray, session: SessionRule) -> np.ndarray:
+    """Intraday slots inside a 24x5 market's weekend close."""
+    dow = weekday_utc(slots)
+    hour = (slots % MS_PER_DAY) // MS_PER_HOUR
+    return (
+        (dow == 5)
+        | ((dow == 4) & (hour >= session.friday_close_hour_utc))
+        | ((dow == 6) & (hour < session.sunday_open_hour_utc))
+    )
+
+
+def _daily_break(slots: np.ndarray, session: SessionRule) -> np.ndarray:
+    """Intraday slots inside a declared daily settlement break, wrapping midnight if it must."""
+    hour = (slots % MS_PER_DAY) // MS_PER_HOUR
+    start, end = session.break_start_hour_utc, session.break_end_hour_utc
+    if start < end:
+        return (hour >= start) & (hour < end)
+    return (hour >= start) | (hour < end)
+
+
+def in_session_mask(
+    ts: np.ndarray, volume: np.ndarray, *, frequency: str, session: SessionRule
+) -> np.ndarray:
+    """True for bars that belong to the session at all -- the read-time contract (ADR-0018).
+
+    This answers *is this bar part of the series*, which is a different question from *should a
+    bar have been here*, and the two must not be confused. Expected-open is generous, so a
+    missing bar in a settlement break is not a boundary. This one has to be exact, because it
+    deletes.
+
+    It excludes one thing: **an intraday bar inside a 24x5 market's weekend close that traded
+    nothing.** Dukascopy pads some eras' weekends with synthetic flat zero-volume bars carrying
+    the Friday close forward -- 8,177 of EURUSD's 8,235 zero-volume bars are inside that window --
+    and those are the padding ADR-0010 recorded and left for v0.3 to drop.
+
+    **The volume test is what makes this safe, and it is not decoration.** The weekend window is
+    deliberately wider than any single DST regime, so it also covers hours in which the market
+    really was open under the other one: Dukascopy's Friday close has been 21:00 and 22:00 UTC in
+    different eras. Deleting on the window alone would throw away real Friday-evening bars, which
+    is a worse error than keeping a synthetic one. A bar that traded is a bar, wherever it lands.
+
+    A real bar that genuinely traded nothing just inside the window is lost to this, and that is
+    the accepted cost: it is one bar an hour before a close, and it is indistinguishable from
+    padding by anything in the file.
+
+    Everything else is in session. A 24x7 market has no closed hours; a 24x5 *daily* bar is
+    stamped 00:00 UTC of its date, so a Sunday one is the week's opening evening rather than a
+    weekend bar (ADR-0014); an equity bar on a non-session date is a vendor disagreeing with the
+    exchange calendar, which is a fact to record rather than a bar to delete; and a bar inside a
+    declared settlement break is kept, because most CFDs really do print some.
+    """
+    ts = np.asarray(ts, dtype=np.int64)
+    if session.kind != "weekend" or grid_step_ms(frequency) >= MS_PER_DAY:
+        return np.ones(ts.size, dtype=bool)
+    return ~(_weekend_shut(ts, session) & (np.asarray(volume) <= 0.0))
+
+
 def open_slot_mask(slots: np.ndarray, *, frequency: str, session: SessionRule) -> np.ndarray:
     """True at every grid slot where ``session`` says the market should be trading.
 
@@ -62,18 +119,14 @@ def open_slot_mask(slots: np.ndarray, *, frequency: str, session: SessionRule) -
         return np.ones(slots.size, dtype=bool)
 
     if session.kind == "weekend":
-        dow = weekday_utc(slots)
         if grid_step_ms(frequency) >= MS_PER_DAY:
             # A daily bar is stamped 00:00 UTC of its date, so its hour carries no information
             # about the session. The rule degrades to the weekday, which is what the vendor
             # publishes: Monday to Friday, plus an occasional Sunday stub we never require.
-            return dow < 5
-        hour = (slots % MS_PER_DAY) // MS_PER_HOUR
-        shut = (
-            (dow == 5)
-            | ((dow == 4) & (hour >= session.friday_close_hour_utc))
-            | ((dow == 6) & (hour < session.sunday_open_hour_utc))
-        )
+            return weekday_utc(slots) < 5
+        shut = _weekend_shut(slots, session)
+        if session.has_break:
+            shut = shut | _daily_break(slots, session)
         return ~shut
 
     if session.kind == "exchange_calendar":

@@ -20,7 +20,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from axiom.clean.calendars import missing_open_slots
+from axiom.clean.calendars import in_session_mask, missing_open_slots
 from axiom.clean.config import CleanConfig, FrequencyRule, SessionRule
 
 #: Why a segment starts or ends. `series_start`/`series_end` mean the data simply began or ran
@@ -242,7 +242,7 @@ def stage_min_length(spans: list[Span], *, min_bars: int) -> tuple[list[Span], S
 # --- composition ------------------------------------------------------------------------
 
 #: Stage name -> the callable that runs it, bound in :func:`run_stages`.
-STAGE_NAMES = ("gap", "jump", "illiquid", "stagnant", "min_length")
+STAGE_NAMES = ("session_filter", "gap", "jump", "illiquid", "stagnant", "min_length")
 
 
 def run_stages(
@@ -253,19 +253,43 @@ def run_stages(
     session: SessionRule,
     frequency: str,
     stage_order: tuple[str, ...] | None = None,
-) -> tuple[list[Span], list[StageStats]]:
-    """Compose the five stages over one series.
+) -> tuple[list[Span], list[StageStats], np.ndarray]:
+    """Compose the stages over one series.
+
+    Returns the surviving spans, the per-rule statistics, and the **in-session timestamps** the
+    spans index into. That third value matters: `session_filter` runs first and drops bars that
+    are not part of the session at all, so every stage after it works on a shorter array than the
+    file holds, and a caller converting a span to timestamps must use the same one.
 
     ``stage_order`` exists so a test can prove the order matters. Production always passes None
     and gets the config's order, which :class:`CleanConfig` will not let differ from ADR-0018.
     """
-    n = len(columns["ts"])
-    if n == 0:
-        return [], []
-    spans = [Span(0, n - 1)]
+    if len(columns["ts"]) == 0:
+        return [], [], columns["ts"]
+
+    order = stage_order or tuple(config.stage_order)
     stats: list[StageStats] = []
 
-    for name in stage_order or tuple(config.stage_order):
+    # Stage zero, always first when it runs at all: bars outside the session are not bars of the
+    # series. Removing them before anything else is what stops a weekend full of the vendor's
+    # synthetic padding from being excised as an illiquid run -- which would partition a series
+    # at every weekend and, at 24x5, leave 120-bar weeks that no min_bars can survive.
+    if "session_filter" in order:
+        keep = in_session_mask(
+            columns["ts"], columns["volume"], frequency=frequency, session=session
+        )
+        dropped = int((~keep).sum())
+        if dropped:
+            columns = {name: values[keep] for name, values in columns.items()}
+        stats.append(StageStats(rule="session_filter", bars_dropped=dropped))
+        order = tuple(name for name in order if name != "session_filter")
+
+    n = len(columns["ts"])
+    if n == 0:
+        return [], stats, columns["ts"]
+    spans = [Span(0, n - 1)]
+
+    for name in order:
         if name == "gap":
             spans, s = stage_gap(spans, columns["ts"], frequency=frequency, session=session)
         elif name == "jump":
@@ -291,4 +315,4 @@ def run_stages(
             spans[0] = replace(spans[0], reason_start="series_start")
         if spans[-1].end == n - 1:
             spans[-1] = replace(spans[-1], reason_end="series_end")
-    return spans, stats
+    return spans, stats, columns["ts"]

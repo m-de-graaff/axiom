@@ -141,7 +141,7 @@ def clean_series(bars: pa.Table, identity: SeriesIdentity, config: CleanConfig) 
     }
     total = bars.num_rows
 
-    spans, stats = run_stages(
+    spans, stats, ts = run_stages(
         columns,
         config=config,
         rule=rule,
@@ -149,9 +149,10 @@ def clean_series(bars: pa.Table, identity: SeriesIdentity, config: CleanConfig) 
         frequency=identity.frequency,
     )
     kept = sum(s.n_bars for s in spans)
-    _check_invariants(spans, total, kept)
-
-    ts = columns["ts"]
+    # The spans index the in-session bars, which is what `n_bars` counts and what a consumer
+    # reading through the index will see (ADR-0018). `total` stays the file's own row count, so
+    # the bars the session filter removed are visible as the difference.
+    _check_invariants(spans, len(ts), kept)
     config_hash = config.config_hash
     segments = [
         {
