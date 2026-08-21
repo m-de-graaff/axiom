@@ -20,8 +20,8 @@ import hashlib
 import io
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
@@ -168,14 +168,6 @@ def build_from_manifests(
     return RegistryBuild(table=table, registry_hash=registry_hash(table), bad=list(bad or []))
 
 
-def _sidecar_names(api: Any, repo_id: str) -> list[str]:
-    return sorted(
-        name
-        for name in api.list_repo_files(repo_id, repo_type="dataset")
-        if name.endswith(SIDECAR_SUFFIX)
-    )
-
-
 def _artifact_sizes(api: Any, repo_id: str) -> dict[str, int]:
     """Byte size per artifact, from the repo tree.
 
@@ -202,38 +194,46 @@ def build_registry(
     repo_id: str,
     *,
     token: str | None = None,
-    concurrency: int = 16,
+    concurrency: int = 4,
 ) -> RegistryBuild:
-    """Download every sidecar in the dataset and reduce them to one table.
+    """Snapshot every sidecar in the dataset and reduce them to one table.
 
-    Threaded because this is eighteen thousand HTTPS round trips for a few hundred bytes each,
-    where the cost is entirely latency. The Hub's own cache makes a rebuild after a pull cheap:
-    only the sidecars that changed are fetched again.
+    One snapshot, not thirteen thousand downloads. The threaded per-file version this replaces
+    was fine at v0.1's few hundred sidecars and lost 19 of them to read timeouts at v0.2's
+    13,580 -- which silently shrank the registry, and a registry that quietly omits an artifact
+    is worse than none, because the omission looks exactly like absence.
+
+    A sidecar that will not **parse** is still reported here. That is a real finding about the
+    file; a timed-out download was never one.
     """
-    from pathlib import Path
+    from huggingface_hub import snapshot_download
 
-    from huggingface_hub import hf_hub_download
+    from axiom.raw.store import retry
 
-    names = _sidecar_names(api, repo_id)
-    log.info("%d sidecar(s) in %s", len(names), repo_id)
+    root = Path(
+        retry(
+            lambda: snapshot_download(
+                repo_id=repo_id,
+                repo_type="dataset",
+                allow_patterns=[f"**/*{SIDECAR_SUFFIX}"],
+                token=token,
+                max_workers=concurrency,
+            ),
+            what="sidecar snapshot",
+        )
+    )
+    paths = sorted(root.rglob(f"*{SIDECAR_SUFFIX}"))
+    log.info("%d sidecar(s) in %s", len(paths), repo_id)
 
     manifests: list[FileManifest] = []
     bad: list[BadSidecar] = []
-
-    def read(name: str) -> tuple[str, FileManifest | None, str]:
+    for path in paths:
+        name = path.relative_to(root).as_posix()
         try:
-            path = hf_hub_download(repo_id=repo_id, filename=name, repo_type="dataset", token=token)
-            return name, FileManifest.from_json(Path(path).read_text(encoding="utf-8")), ""
+            manifests.append(FileManifest.from_json(path.read_text(encoding="utf-8")))
         except Exception as exc:
-            return name, None, f"{type(exc).__name__}: {exc}"
-
-    with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="registry") as pool:
-        for name, manifest, error in pool.map(read, names):
-            if manifest is None:
-                log.warning("unreadable sidecar %s: %s", name, error)
-                bad.append(BadSidecar(name, error))
-            else:
-                manifests.append(manifest)
+            log.warning("unreadable sidecar %s: %s", name, exc)
+            bad.append(BadSidecar(name, f"{type(exc).__name__}: {exc}"))
 
     return build_from_manifests(manifests, sizes=_artifact_sizes(api, repo_id), bad=bad)
 
