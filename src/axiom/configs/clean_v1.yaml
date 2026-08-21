@@ -1,0 +1,67 @@
+# Cleaning config v1 — Kronos Appendix B Algorithm 1, thresholds from Table 4.
+#
+# Semantics are pinned in ADR-0018. This file holds only the numbers, and every number in it
+# feeds `clean_config_hash`, which is stamped into every segment row. Changing a threshold
+# invalidates the segments derived under the old one; that is the point.
+
+clean_version: 1
+
+# Stage order. Part of the hash, and locked by a test that constructs a series whose segments
+# differ under any other ordering (ADR-0018).
+stage_order:
+  - gap
+  - jump
+  - illiquid
+  - stagnant
+  - min_length
+
+# `volume <= illiquid_eps` is an illiquid bar. Exact zero: the rule is about the absence of
+# trading, not about thinness. The paper says "near-zero", which is not a number; this is.
+illiquid_eps: 0.0
+
+# Kronos Table 4, in full. Columns: min_bars / jump_threshold / max_illiquid / max_stagnant.
+# A run of exactly max_* bars is kept; strictly longer is excised.
+#
+# v1.0 exercises the 1h and 1d rows only. The rest are carried so that an M1 stretch (15m/5m
+# crypto, Gate G3) is a config selection rather than a code change.
+#
+# PROVENANCE WARNING: the 10m, 20m, 40m and 2H rows come from an earlier extraction of the table
+# and have NOT been re-read against the paper PDF. They must be verified before first use. The
+# 1m, 5m, 15m, 30m, 4H, 1d and 1w rows are confirmed.
+frequencies:
+  1m:  { min_bars: 2048, jump_threshold: 0.10, max_illiquid: 15, max_stagnant: 45 }
+  5m:  { min_bars: 1024, jump_threshold: 0.15, max_illiquid: 3,  max_stagnant: 10 }
+  10m: { min_bars: 512,  jump_threshold: 0.15, max_illiquid: 3,  max_stagnant: 6,  verified: false }
+  15m: { min_bars: 512,  jump_threshold: 0.15, max_illiquid: 2,  max_stagnant: 5 }
+  20m: { min_bars: 512,  jump_threshold: 0.15, max_illiquid: 2,  max_stagnant: 5,  verified: false }
+  30m: { min_bars: 512,  jump_threshold: 0.20, max_illiquid: 2,  max_stagnant: 3 }
+  40m: { min_bars: 256,  jump_threshold: 0.20, max_illiquid: 1,  max_stagnant: 3,  verified: false }
+  1h:  { min_bars: 256,  jump_threshold: 0.20, max_illiquid: 1,  max_stagnant: 3 }
+  2h:  { min_bars: 128,  jump_threshold: 0.25, max_illiquid: 1,  max_stagnant: 3,  verified: false }
+  4h:  { min_bars: 128,  jump_threshold: 0.25, max_illiquid: 1,  max_stagnant: 3 }
+  1d:  { min_bars: 128,  jump_threshold: 0.30, max_illiquid: 1,  max_stagnant: 3 }
+  1w:  { min_bars: 16,   jump_threshold: 0.50, max_illiquid: 0,  max_stagnant: 2 }
+
+# Which missing grid steps are expected, per session (ADR-0018). `strict` means every step must
+# hold a bar and any absence is a boundary.
+sessions:
+  24x7:
+    kind: strict
+  24x5:
+    kind: weekend
+    # The window in which a 24x5 market is expected to be shut: from Friday `friday_close_hour_utc`
+    # to Sunday `sunday_open_hour_utc`, UTC, plus all of Saturday.
+    #
+    # Dukascopy's week boundary follows a European-DST server clock: the week closes ~21:00 UTC
+    # Friday in summer and ~22:00 in winter, and opens ~21:00/22:00 Sunday. The window is
+    # deliberately generous at both ends so a DST shift is never read as an outage. The cost is
+    # that a genuine two-hour Friday-evening outage is counted as expected; that is the safe
+    # direction, and it is a window three hours wide.
+    #
+    # At 1d the hours are meaningless -- a daily bar is stamped 00:00 UTC of its date -- so the
+    # rule degrades to "Saturday and Sunday are expected", which is what the vendor publishes.
+    friday_close_hour_utc: 20
+    sunday_open_hour_utc: 23
+  XNYS-regular:
+    kind: exchange_calendar
+    calendar: XNYS

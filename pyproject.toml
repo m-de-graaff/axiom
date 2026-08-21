@@ -24,6 +24,11 @@ kaggle = ["kaggle>=1.6"]
 # tests drive every loader through a synthetic fetcher, so a broker client in CI would buy
 # nothing but a network dependency in a suite that must not have one.
 data = ["dukascopy-python>=4.0.1", "pandas>=2.2", "yfinance>=0.2.50"]
+# NYSE holidays back to 1962, including the moving ones (Good Friday) and the one-off closures
+# (9/11, Sandy, state funerals). Hand-rolling that is how a corpus grows silent boundaries.
+# Needed by the cleaning engine, so it is in `dev` too -- a CI run that skipped the XNYS gap
+# tests would be green about the one rule with an external dependency.
+calendars = ["exchange-calendars>=4.13,<5"]
 # `axiom registry query` only. The canned reports are group-bys over a few thousand rows and run
 # on pyarrow alone; a SQL engine earns its place when the question is arbitrary.
 query = ["duckdb>=1.1"]
@@ -35,6 +40,7 @@ dev = [
     "pre-commit>=4.0",
     "ty>=0.0.1a1",
     "duckdb>=1.1",
+    "exchange-calendars>=4.13,<5",
 ]
 
 [project.scripts]
