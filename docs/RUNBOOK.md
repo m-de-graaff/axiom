@@ -328,11 +328,20 @@ a measured fact about what the vendor will serve.
 Dukascopy's chart endpoint returns **HTTP 403 to GitHub Actions runner IPs** and answers a Kaggle
 kernel. ADR-0015 records all three hosts. So this is the one pull that does not run on Actions.
 
-**Before the first run, attach the secrets to the kernel.** Kaggle scopes secrets per kernel, so
-`axiom-pull-dukascopy` does not inherit the ones already attached to `axiom-loop-test`; without
-them the kernel dies on `get_secret` with an HTTP 400 that reads like a network error. In the
-Kaggle UI, open the kernel, then **Add-ons → Secrets**, and attach `GH_PAT` and `HF_TOKEN`. This
-is a one-time UI action with no API equivalent.
+**Attach the secrets after every push, and never before one.** Two separate facts combine here:
+Kaggle scopes secrets per kernel, so `axiom-pull-dukascopy` does not inherit the ones attached to
+`axiom-loop-test`; and `kernels push` wipes whatever is attached (see the v0.0 section above).
+Without them the kernel dies on `get_secret` with an HTTP 400 that reads like a network error.
+
+So the order is always:
+
+1. `uv run kaggle kernels push -p remote/kaggle/pull_dukascopy` — uploads the code, wipes secrets.
+2. In the Kaggle UI: open the kernel, **Add-ons → Secrets**, attach `GH_PAT` and `HF_TOKEN`.
+3. **Run** in the editor.
+
+Doing 2 before 1 loses the attachment and the run fails in a way that reads like a network fault.
+Steps 2 and 3 have no API equivalent, which is why this kernel cannot be driven end-to-end from
+a script the way the Actions workflows can.
 
 ```sh
 uv run kaggle kernels push -p remote/kaggle/pull_dukascopy
