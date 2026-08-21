@@ -70,6 +70,16 @@ source and frequency, and eyeballed sane.
 8. **Modal is still not the backend.** GitHub Actions ran every corpus job; `remote/modal/clean_run.py`
    exists and runs the identical CLI when the ADR-0009 account gate clears.
 
+### Follow-up, 2026-08-22 (v0.3.1)
+
+The one item the gate recorded as a deviation — Stooq sidecars still reading
+`vendor_adjusted_unverified` — is closed. `axiom raw stamp-verdict` wrote the measured verdict
+into 12,425 sidecars with 0 failures, in a field held outside the identity hash, so no Parquet
+moved and this gate's evidence still stands unchanged. `segments_hash` is still `474ebff75c51`.
+
+Doing it exposed three more copies of the per-file Hub download and a registry that had silently
+published 19 artifacts short. Both fixed; the registry rebuilt clean at 13,580.
+
 ### What the corpus run found that no test would have
 
 Every one of the five bugs fixed in v0.3 came from a real run, not from a test written in advance:

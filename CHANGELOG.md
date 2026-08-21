@@ -6,6 +6,48 @@ versioning with git tags.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-22
+
+The v0.3 gate left one thing on the list: all 12,425 Stooq sidecars still recorded
+`vendor_adjusted_unverified`, which is what the loader believed *before* the audit ran. It is
+fixed, and fixing it flushed out three more instances of a bug already fixed three times.
+
+### Added
+
+- **`axiom raw stamp-verdict`** (ADR-0019 amendment). Writes a measured audit verdict into a
+  source's sidecars. Ran over the corpus: **12,425 stamped, 0 failed**, in 100 seconds.
+
+  Correcting `adjustment_policy` in place was never possible — it is inside `manifest_sha256`,
+  which is stamped into every Parquet's own metadata, so editing it breaks the file-to-sidecar
+  link on twelve thousand artifacts, moves `artifact_sha256`, and invalidates the entire segment
+  index. So the verdict goes in a **second** field, `adjustment_policy_verified`, held outside the
+  identity hash — the category `VOLATILE_MANIFEST_FIELDS` already existed for. Two fields rather
+  than one correction, because what was believed at pull time and what was measured afterwards
+  are two different facts and both are worth keeping.
+
+  No Parquet was rewritten, no `artifact_sha256` moved, and `clean/v1/` stayed valid throughout.
+  The registry carries the column, so `axiom derive tr` reads the verdict instead of falling back
+  to a constant and printing a note about the divergence.
+
+### Fixed
+
+- **The per-file Hub download, in its fourth, fifth and sixth homes.** `list_manifests`,
+  `build_registry` and `derive tr` each fetched all 13,580 sidecars one at a time. The registry
+  rebuild lost 19 of them to `ReadTimeout` and published a registry with **13,561 artifacts**,
+  which `clean run` reads — so nineteen series would have been skipped with nothing saying so.
+  All three now take one snapshot. The registry rebuilt clean at 13,580, `registry_hash`
+  `1ef9ebb7a4a3`.
+- **Hub HTTP timeouts.** `huggingface_hub` reads with a ten-second timeout and
+  `snapshot_download` abandons the whole batch on the first file that exceeds it, so every retry
+  round died early and all eight were exhausted. Ten seconds is fine for a handful of files and
+  not for thirteen thousand: 120s download, 60s etag, twelve rounds. The Hub is not slow here, it
+  is rate-shaping, and waiting is the correct response.
+- **A partial clean run no longer publishes over the full index.** `--limit` is for smoke runs,
+  and a smoke run must not become the corpus — `clean/v1/` overwritten with fifty series looks
+  exactly like a corpus that shrank rather than like a test, which is what happened the first
+  time and why the drop-stats report showed 50 series for a while. `--force` overrides.
+
+
 ## [0.3.0] - 2026-08-21
 
 The **cleaning pass**, delivered as metadata rather than as a corpus. Kronos Appendix B
