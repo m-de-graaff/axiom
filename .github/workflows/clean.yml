@@ -20,7 +20,7 @@ on:
         description: Clean only the first N artifacts. Empty means the whole corpus.
         default: ""
       concurrency:
-        description: Simultaneous artifact downloads. Above ~8 the Hub rate-limits.
+        description: Simultaneous downloads while snapshotting the bar tier.
         default: "8"
       derive_tr:
         description: Also build the derived total-return tier (ADR-0019).
@@ -57,6 +57,19 @@ jobs:
       # `calendars` brings exchange_calendars, which the XNYS gap predicate needs. Without it
       # every equity series would fail rather than quietly clean against the wrong calendar.
       - run: uv sync --frozen --extra calendars
+
+      # The bar tier is under two gigabytes and does not change between clean runs, so caching it
+      # turns a rerun -- and this version needs several -- into a job that touches the Hub only
+      # for the registry and the upload. The key carries the registry hash so a pull invalidates
+      # it; `restore-keys` still gets a warm partial cache when it does, and snapshot_download
+      # fetches only what moved.
+      - name: Cache the raw bar tier
+        uses: actions/cache@640a1c2554105b57832a23eea0b4672fc7a790d5 # v4.2.3
+        with:
+          path: ~/.cache/huggingface/hub
+          key: axiom-raw-bars-${{ hashFiles('uv.lock') }}-v1
+          restore-keys: |
+            axiom-raw-bars-
 
       - name: Explain why a series fragmented
         if: inputs.probe != ''

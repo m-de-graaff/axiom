@@ -1059,12 +1059,15 @@ def clean_run(
         int | None, typer.Option("--limit", help="Clean only the first N artifacts. Smoke runs.")
     ] = None,
     concurrency: Annotated[
-        int,
-        typer.Option(
-            "--concurrency",
-            help="Simultaneous artifact downloads. Above ~8 the Hub starts returning 429.",
-        ),
+        int, typer.Option("--concurrency", help="Simultaneous downloads during the snapshot.")
     ] = 8,
+    snapshot: Annotated[
+        bool,
+        typer.Option(
+            "--snapshot/--stream",
+            help="Fetch the bar tier once, then clean offline. --stream downloads per artifact.",
+        ),
+    ] = True,
 ) -> None:
     """Clean every bar artifact in the registry into one segment index.
 
@@ -1111,16 +1114,17 @@ def clean_run(
         existing_drops = pq.read_table(io.BytesIO(drop_bytes)) if drop_bytes else None
 
     typer.echo(f"{len(refs)} bar artifact(s), config hash {cfg.config_hash}")
+    read, workers = _bar_reader(store, dest, refs, snapshot=snapshot, concurrency=concurrency)
     try:
         run = clean_corpus(
             refs,
-            lambda ref: store.get(ref.artifact_path),
+            read,
             cfg,
             existing=existing,
             existing_dropstats=existing_drops,
             incremental=incremental,
             registry_hash=registry_metadata(registry).get("axiom_registry_hash", ""),
-            concurrency=1 if dest is not None else concurrency,
+            concurrency=workers,
         )
     except ConfigHashChanged as exc:
         typer.echo(str(exc), err=True)
@@ -1134,6 +1138,51 @@ def clean_run(
         typer.echo(f"  FAILED {failure['artifact_path']}: {failure['error']}", err=True)
     if run.failed:
         raise typer.Exit(1)
+
+
+def _bar_reader(store, dest: Path | None, refs, *, snapshot: bool, concurrency: int):
+    """How the clean run gets each artifact's bytes, and how many workers to use doing it.
+
+    Fetching thirteen thousand files one at a time does not work against the Hub. Each
+    `hf_hub_download` is a HEAD against `/resolve/` plus a GET, and twenty-six thousand of those
+    earns a 429 no matter how few threads make them -- the first corpus run crawled through
+    eighty-five-second backoffs and the second was rate-limited off entirely.
+
+    `snapshot_download` asks for the repo tree once and fetches from it, which halves the request
+    count and is the path the Hub optimises. The bar tier is under two gigabytes, so a runner can
+    simply hold it: after the snapshot the clean loop touches no network at all, which also means
+    the concurrency cap stops being about politeness and starts being about CPU.
+    """
+    if dest is not None:
+        root = Path(dest)
+    elif not snapshot:
+        return (lambda ref: store.get(ref.artifact_path)), concurrency
+    else:
+        import os
+
+        from huggingface_hub import snapshot_download
+
+        from axiom.config.settings import AxiomSettings
+
+        settings = AxiomSettings()
+        typer.echo(f"snapshotting {len(refs)} artifact(s) from {settings.raw_repo_id}...")
+        root = Path(
+            snapshot_download(
+                repo_id=settings.raw_repo_id,
+                repo_type="dataset",
+                allow_patterns=["raw/**/*.parquet"],
+                token=settings.hf_token.get_secret_value() if settings.hf_token else None,
+                max_workers=concurrency,
+            )
+        )
+        concurrency = min(32, (os.cpu_count() or 4) * 2)
+        typer.echo(f"snapshot at {root}; cleaning with {concurrency} worker(s)")
+
+    def read(ref) -> bytes | None:
+        path = root / ref.artifact_path
+        return path.read_bytes() if path.exists() else None
+
+    return read, concurrency
 
 
 @clean_app.command("probe")
