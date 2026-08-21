@@ -6,6 +6,96 @@ versioning with git tags.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-21
+
+Corpus **M0 assembled**. The raw tier grew from one source to four: FX and commodities from
+Dukascopy, the whole US equity market from Stooq, and split/dividend events from Yahoo, joined by
+a queryable registry over every sidecar in `axiom-raw`.
+
+**13,580 artifacts, 42,358,938 bars, 1.90 GB.** All five M0 slices present at their required
+frequencies. The bar count is **below** the roadmap's ~50 M target and is recorded as a shortfall
+with an analysis, not massaged into a pass — see `docs/reports/v0.2-raw-qa.md`.
+
+The laptop still holds no market data. ADR-0016's staging exception was never used;
+`staging_exception_used` is false in every pull run manifest.
+
+### Verified
+
+Three carried unverifieds were resolved by measurement, and **two came out opposite to
+expectation**. Dukascopy returns 403 to GitHub Actions runners and answers a Kaggle kernel, so
+that one pull moved backends permanently. A Stooq handoff URL returned 404 from both a runner and
+the laptop within minutes — expired, not IP-bound, which matters because only the IP-bound case is
+what the laptop staging exception exists for. Yahoo, expected to block datacenter IPs, answered
+503 of 503 tickets with zero failures.
+
+The adjustment audit returned **`split_adjusted`**: AAPL, NVDA and TSLA show close ratios of
+0.9672, 0.9926 and 1.0035 across splits of 4:1, 10:1 and 3:1. That half of the audit needs only
+the stored bars and a calendar, which is why it produced an answer on a day when the Hub was
+rate-limiting reads.
+
+Every v0.1 sidecar was re-read by v0.2 code and still verified its own recorded hash.
+
+### Added
+
+- **A source framework** (`sources/base.py`). One driver owning the skip test, validation, the
+  Parquet write, the sidecar, the run manifest and the per-item blast wall; a source supplies
+  `plan`, `build`, `manifest_extras` and `artifact_path`. Every v0.1 test passed unedited against
+  it, which was the refactor's acceptance test.
+- **Dukascopy loader** (ADR-0015). Bid candles, year-chunked, prior years immutable. The skip test
+  is the shared one: a sealed year's token is constant, the current year's carries the run's
+  as-of date.
+- **Stooq loader** (ADR-0016). The bulk US archive via a human-solved CAPTCHA and a URL handed to
+  a cloud job. Letter-sharded layout, and tolerances that differ on purpose — a short series is
+  skipped, malformed lines are dropped up to 0.1% of a file, and a duplicate date fails outright
+  because every other defect is absence of information and that one is a contradiction.
+- **yfinance adjunct** (ADR-0016). Splits and dividends for a pinned cross-check population,
+  rate-limited to 300 requests an hour, non-load-bearing by construction.
+- **Corpus registry.** One table over every sidecar, answering what/from-where/pulled-when without
+  touching the raw files. A rebuild from an unchanged tier reproduces the same `registry_hash`.
+  A sidecar it cannot read is reported, never dropped.
+- **Cross-source manifest conventions** (ADR-0014): `price_side`, `volume_convention`,
+  `redistribution_class`, `staging_exception_used`, and per-series statistics for weekend padding
+  and dollar volume. Fields holding their v0.1-equivalent default are dropped from the identity
+  hash, so no existing sidecar was invalidated.
+- **`docs/DATA_LICENSING.md`**, classifying all four sources. The loaders are publishable; the
+  bars are not, from any of them.
+
+### Changed
+
+- **`exchange_tz` and `session_id` stay metadata**, superseding v0.1's stated plan to promote them
+  to columns (ADR-0014). They vary between files and are constant within one, so a column would
+  store per row what the path already fixes. Schema stays v1.
+- **The source repository is public** (ADR-0017), taken to get unlimited Actions minutes after the
+  private-repo allowance ran out mid-version. PyPI, `axiom-tokenized` and `axiom-model` still wait
+  for the Publish Gate, and `axiom-raw` is now private permanently rather than "until the gate".
+- **Hub commit batching, 50 to 2,000 files.** The Hub allows 128 commits an hour; the equities
+  tier at the old size is roughly 500 and died partway. At the new one it is 13, and the pull
+  finished in 49 minutes with zero Hub errors.
+- **The equities universe ranks from the registry**, not from downloads. Its statistic is computed
+  at pull time, when the bars are already in memory.
+
+### Fixed
+
+Four bugs, all found by real runs, and all the same shape: **an error being silently converted
+into a value.**
+
+- A rate-limited Parquet read returned `0.0`, which the ranking's `> 0` cut then discarded — so a
+  Hub 429 became "this stock has no volume". One run measured 1,344 of 6,829 candidates and
+  reported "978 of 978 kept". Failures are no longer representable as rankings, and the build
+  refuses to emit a universe when more than 1% is unmeasured.
+- A Hub 429 on `upload_folder` escaped `pull_ticker` and killed a 503-ticker run that had already
+  landed 125. The blast wall covered only the fetch, not the store.
+- `run_pull`'s final `store.flush()` sat outside its blast wall, so a failing last commit crashed
+  the process and took the run manifest with it.
+- The cross-check asked Yahoo for Stooq's spelling of the ticker (`SMXT.US`), which 404s. Every
+  comparison would have failed and the report would have read as "Yahoo would not answer".
+
+And one rule that was simply wrong about real data: **weekend bars are counted, not rejected.**
+Asserting an empty weekend failed 24 of 27 hourly FX series. Measuring the feed across its own
+history showed why — the week opened at 19:00 UTC in 2003, and some eras pad the weekend with
+flat zero-volume bars carrying the Friday close forward. Rejecting a 155,000-bar series over 8,000
+rows of vendor padding is the undocumented cleaning pass ADR-0010 exists to forbid.
+
 ## [0.1.0] - 2026-08-20
 
 The canonical bar schema, the provenance-manifest system, and a checksum-verified, resumable
