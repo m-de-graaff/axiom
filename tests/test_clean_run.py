@@ -377,6 +377,24 @@ def test_red_flags_fire_on_a_major_that_loses_too_much(tier) -> None:
     assert red_flags(dropstats, majors={"NOBODY"}, slice_limit_pct=100.0) == []
 
 
+def test_the_session_filter_does_not_count_as_damage_to_a_major(tier) -> None:
+    """Padding that never traded is not a bar the cleaner lost.
+
+    Counting it as damage flagged every FX instrument for the cleaner working correctly: EURUSD
+    loses 5.99 % of its file and 0.76 % of its market data.
+    """
+    store, _ = tier
+    padded = synth.with_weekend_padding(synth.walk("1h", 900, seed=41, session_id="24x5"))
+    write_series(store, padded, source="dukascopy", market="fx", asset_class="fx", symbol="EURUSD")
+    fresh = store.list_manifests()
+    dropstats = pq.read_table(
+        io.BytesIO(write_outputs(run_over(store, fresh, config()))[clean_paths(1)["dropstats"]])
+    )
+    rows = {r["symbol"]: r for r in most_cut_series(dropstats, limit=100)}
+    assert rows["EURUSD"]["by_rule"]["session_filter"] > 0, "no padding was filtered"
+    assert not [f for f in red_flags(dropstats, majors={"EURUSD"}) if "EURUSD" in f["subject"]]
+
+
 # --- the derived total-return tier ------------------------------------------------------
 
 

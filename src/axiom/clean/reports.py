@@ -147,25 +147,66 @@ def red_flags(
     majors: set[str] | None = None,
     major_limit_pct: float = 1.0,
     slice_limit_pct: float = 15.0,
+    weekend_split_limit: float = 300.0,
 ) -> list[dict[str, Any]]:
     """The Phase F checks that must each be ticked pass or carry a written investigation.
 
-    Three, from the plan: a major losing more than ``major_limit_pct`` of its bars; an FX weekend
-    contributing any gap cuts at all (it must not -- the weekend is an expected gap); a source x
-    frequency slice losing more than ``slice_limit_pct`` overall.
+    Three, from the plan, each measuring what it was meant to rather than what was easy:
+
+    **A major losing more than ``major_limit_pct``** — *of the bars that were ever market data*.
+    The session filter removes the vendor's synthetic weekend padding, which never traded, and
+    counting that as damage would flag every FX instrument for the cleaner working correctly.
+    EURUSD loses 5.99 % of its file and 0.76 % of its market data; the second number is the one
+    this check is about.
+
+    **The weekend being cut as a gap.** The plan's version — "FX weekend gaps contribute zero to
+    drop counts" — is true by construction and therefore proves nothing: the gap rule partitions
+    and never drops a bar, so its drop count is always zero. What would actually show a weekend
+    being cut is fragmentation: a 24x5 series partitioned every Friday accumulates one split per
+    week, so 23 years of history would carry roughly 1,200. Measured, Dukascopy carries 89 per
+    series, which is holidays and outages rather than weekends.
+
+    **A source x frequency slice losing more than ``slice_limit_pct``** overall.
     """
     majors = majors or {"BTCUSDT", "ETHUSDT", "EURUSD", "USDJPY", "XAUUSD", "SPY", "AAPL"}
     flags: list[dict[str, Any]] = []
 
-    for entry in most_cut_series(dropstats, limit=10_000):
-        if entry["symbol"] in majors and entry["pct_dropped"] > major_limit_pct:
+    for entry in most_cut_series(dropstats, limit=1_000_000):
+        if entry["symbol"] not in majors:
+            continue
+        traded = entry["total_bars"] - entry["by_rule"].get("session_filter", 0)
+        lost = entry["dropped_bars"] - entry["by_rule"].get("session_filter", 0)
+        pct = round(100.0 * lost / traded, 3) if traded else 0.0
+        if pct > major_limit_pct:
             flags.append(
                 {
                     "check": "major_series_loss",
                     "subject": entry["artifact_path"],
-                    "value": entry["pct_dropped"],
+                    "value": pct,
                     "limit": major_limit_pct,
-                    "detail": f"{entry['symbol']} lost {entry['pct_dropped']}% of its bars",
+                    "detail": f"{entry['symbol']} lost {pct}% of the bars that ever traded",
+                }
+            )
+
+    splits: dict[tuple[str, str], list[float]] = {}
+    for row in dropstats.to_pylist():
+        if row["rule"] != "gap":
+            continue
+        key = (row["source"], row["frequency"])
+        acc = splits.setdefault(key, [0.0, 0.0])
+        acc[0] += row["segments_created"]
+        acc[1] += 1
+    for (source, frequency), (created, series) in sorted(splits.items()):
+        per_series = created / series if series else 0.0
+        if per_series > weekend_split_limit:
+            flags.append(
+                {
+                    "check": "weekend_cut_as_gap",
+                    "subject": f"{source}/{frequency}",
+                    "value": round(per_series, 1),
+                    "limit": weekend_split_limit,
+                    "detail": "gap splits per series are at the scale of one per week, which is "
+                    "what a session rule that does not know about the weekend produces",
                 }
             )
 
@@ -174,16 +215,6 @@ def red_flags(
         key = (row["source"], row["frequency"])
         acc = by_slice.setdefault(key, {"dropped": 0, "total": row["total_bars"]})
         acc["dropped"] += row["bars_dropped"]
-        if row["rule"] == "gap" and row["source"] == "dukascopy" and row["segments_dropped"]:
-            flags.append(
-                {
-                    "check": "fx_weekend_contributed_cuts",
-                    "subject": f"{row['source']}/{row['frequency']}",
-                    "value": row["segments_dropped"],
-                    "limit": 0,
-                    "detail": "the weekend is an expected gap and must produce no dropped segments",
-                }
-            )
     for (source, frequency), acc in sorted(by_slice.items()):
         pct = 100.0 * acc["dropped"] / acc["total"] if acc["total"] else 0.0
         if pct > slice_limit_pct:
