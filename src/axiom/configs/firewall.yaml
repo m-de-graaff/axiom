@@ -1,0 +1,18 @@
+# The temporal firewall (ADR-0021).
+#
+# No statistic, constant, threshold, or model parameter in this project may be derived from a bar
+# at or after `firewall_ts`, until v0.8 opens the sealed evaluation. The scaling constants in
+# contract_constants_v1.yaml are the first thing this binds, which is why the date is fixed here
+# in v0.4 rather than in v0.5 where the roadmap put it.
+#
+# Chosen against registry 56873db71b6d, whose five M0 slices end between 2026-08-19 and
+# 2026-08-21. A 2025-01-01 firewall leaves 19.6 months of post-firewall history in every one of
+# them, against the 18-month floor. It is a calendar-year boundary because a round date is one
+# fewer thing to mistype in a year of manifests.
+firewall_ts: 1735689600000
+firewall_date_utc: "2025-01-01T00:00:00Z"
+rationale: >-
+  19.6 months of post-firewall history in the shortest M0 slice (crypto UM 1h, ending
+  2026-08-19), against an 18-month floor. Calendar-year boundary, chosen before any constant was
+  fitted and before any evaluation window was designed.
+registry_hash: 56873db71b6d

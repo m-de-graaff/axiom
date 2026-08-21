@@ -1,0 +1,16 @@
+# The leaky baseline (ADR-0020, Phase F). NOT a production spec.
+#
+# Kronos's `KronosPredictor` normalization, reproduced faithfully: each feature is z-scored
+# against the mean and standard deviation of the very window being normalized. Every row knows
+# about every other row, so it fails prefix-consistency by construction -- which is the point.
+# It exists so v0.5 can put a number on what the leak buys in reconstruction quality.
+#
+# `transform` refuses this spec unless the caller passes allow_leaky=True, and the v0.6
+# pre-tokenization and v0.9 Predictor paths never do.
+spec_id: kronos-zscore-v0
+schema_version: 1
+parameterization: geo
+volume_window: 256
+clip_low: -5.0
+clip_high: 5.0
+leaky: true

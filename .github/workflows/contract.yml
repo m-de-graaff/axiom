@@ -1,0 +1,104 @@
+# The two v0.4 corpus passes: fit the frozen scaling constants, then measure what they produce.
+#
+# Both stream the cleaned segment index and keep statistics. Neither writes a feature row anywhere
+# -- v0.6 is what stores features. The runner is the backend for the same reason cleaning uses it:
+# the laptop must never hold corpus bytes, and this is pure CPU over a few gigabytes of Parquet.
+#
+# The outputs are committed files -- a constants YAML, a QA report, and five regression hashes --
+# so they are uploaded as artifacts and a human commits what they have read.
+
+name: contract
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Which pass to run.
+        type: choice
+        options: [fit, dryrun, both]
+        default: both
+      limit:
+        description: Process only the first N artifacts. A partial fit will not load.
+        default: ""
+      concurrency:
+        description: Simultaneous downloads while snapshotting the bar tier.
+        default: "4"
+      audit_segments:
+        description: How many real segments the prefix-consistency audit covers.
+        default: "50"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contract
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv sync --frozen
+
+      # Same cache key as the clean workflow: it is the same bar tier, it does not change between
+      # runs, and a rerun that skips the snapshot touches the Hub only for the segment index.
+      - name: Restore the raw bar tier
+        uses: actions/cache/restore@640a1c2554105b57832a23eea0b4672fc7a790d5 # v4.2.3
+        with:
+          path: ~/.cache/huggingface/hub
+          key: axiom-raw-bars-v1
+          restore-keys: |
+            axiom-raw-bars-
+
+      - name: Fit the frozen constants
+        if: inputs.job == 'fit' || inputs.job == 'both'
+        env:
+          AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
+          AXIOM_GIT_COMMIT: ${{ github.sha }}
+          AXIOM_DISABLE_TRACKING: "1"
+          # Xet mints a read token per request and rate-limits a burst of thirteen thousand of
+          # them. The bar files are small enough that its dedup buys nothing here.
+          HF_HUB_DISABLE_XET: "1"
+        run: |
+          uv run axiom contract fit-constants \
+            --concurrency '${{ inputs.concurrency }}' \
+            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
+
+      - name: Stream the corpus through both specs
+        if: inputs.job == 'dryrun' || inputs.job == 'both'
+        env:
+          AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
+          AXIOM_GIT_COMMIT: ${{ github.sha }}
+          AXIOM_DISABLE_TRACKING: "1"
+          HF_HUB_DISABLE_XET: "1"
+        run: |
+          uv run axiom contract dryrun \
+            --concurrency '${{ inputs.concurrency }}' \
+            --audit-segments '${{ inputs.audit_segments }}' \
+            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
+
+      - name: Save the raw bar tier
+        if: always()
+        uses: actions/cache/save@640a1c2554105b57832a23eea0b4672fc7a790d5 # v4.2.3
+        with:
+          path: ~/.cache/huggingface/hub
+          key: axiom-raw-bars-v1-${{ github.run_id }}
+
+      # `always()` because a failed dryrun is exactly the run whose report explains the failure.
+      - name: Upload the outputs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: contract-outputs
+          path: |
+            src/axiom/configs/contract_constants_v1.yaml
+            docs/reports/v0.4-contract-qa.md
+            tests/snapshots/contract_v1.json
+          if-no-files-found: warn

@@ -17,8 +17,8 @@ raw bars → clean → contract (schema_version=1) → BSQ tokenizer → MDS sha
 | C2 | Data acquisition: Binance, Dukascopy, Stooq, yfinance | v0.1–v0.2 | **Built** — all four loaders, complete for v1.0 scope |
 | C3 | Storage: Parquet layout, provenance manifests, corpus registry | v0.1–v0.2 | **Built** — schema, layout, manifests and registry |
 | C4 | Cleaning: Kronos Algorithm 1, Table 4 thresholds, split/dividend policy | v0.3 | **Built** — segment index, session-aware gaps, total-return policy |
-| C5 | Preprocessing contract: candle geometry, causal normalization, golden vectors | v0.4 | Not started |
-| C6 | Tokenizer: BSQ default, flat FSQ ablation, temporal firewall | v0.5 | Not started |
+| C5 | Preprocessing contract: candle geometry, causal normalization, golden vectors | v0.4 | **Built** — two frozen specs, frozen constants, prefix-consistency audit |
+| C6 | Tokenizer: BSQ default, flat FSQ ablation, temporal firewall | v0.5 | Unblocked, pending G2 sign-off |
 | C7 | Pre-tokenization: uint16 token pairs, time features, conditioning IDs, MDS shards | v0.6 | Not started |
 | C8 | AR decoder: adapted Kronos, 25 M params, dual head, conditioning embeddings | v0.7 | Not started |
 | C9 | Evaluation: CRPS, PIT, RankIC, volatility vs GARCH, five baselines | v0.8 | Not started |
@@ -89,8 +89,46 @@ driver is exempt and says so: it is handed bytes and contains none of the rules.
 rewrite. Everything above follows from that — the segment index, the config hash on every row, the
 staleness guard, and the refusal to run `--incremental` across a config change.
 
-Next up is C5, the preprocessing contract, in v0.4. Gate **G2** stands between it and any
-tokenizer work.
+## What v0.4 built
+
+C5, and no new online infrastructure. Three things are worth knowing before reading the modules.
+
+**The contract is a pure function of the bars it is handed and frozen constants.** Not of the
+corpus, not of the file the bars came from, not of anything fitted at call time. Every other
+decision in v0.4 is that rule applied somewhere specific: the constants are fitted once and
+committed rather than estimated per window, the flow features take a strictly-past median rather
+than a window statistic, and a bad input is refused rather than repaired.
+
+**Causality is a property, not a claim.** The rule above buys one testable consequence, and
+ADR-0020 makes it the definition: `transform(bars[:t+1])` is exactly the first `t` rows of
+`transform(bars)`, bit for bit. It is property-tested on generated series in CI, marked
+`@causality` so v0.8's leakage suite selects on it, and audited on real segments cloud-side. A
+second probe — perturb bar `j`, every earlier row is unchanged — runs alongside it, because a
+transform reaching forward through a running statistic could conceivably satisfy one and not the
+other.
+
+**Bar 0 is the anchor and produces no feature row.** It seeds the gap feature, the first
+strictly-past median, and the Predictor's price inversion. That makes usable windows
+`Σ max(0, (n_bars − 1) − 511)`, one fewer per segment than the v0.3 report published; the
+corrected table is in `docs/reports/v0.4-contract-qa.md`.
+
+| Module | Does |
+|---|---|
+| `axiom.contract` | The four public functions. v0.6 and v0.9 import these and nothing else |
+| `axiom.contract.spec` | Frozen specs, constants and the firewall config, with unknown keys rejected |
+| `axiom.contract.rolling` | The strictly-past median — the one place a feature sees past its own bar |
+| `axiom.contract.transform` | Bars to six causal features, with every refusal checked first |
+| `axiom.contract.inverse` | Features back to bars, projected onto the valid-candle set |
+| `axiom.contract.stats` | Mergeable `asinh`-binned quantile sketches, shared by both corpus passes |
+| `axiom.contract.corpus` | The Phase B fit and the Phase E dryrun, as pure functions over bytes |
+| `axiom.contract.reports` | The generated half of the v0.4 QA report |
+| `axiom.testing.contract` | Constants tables for tests, one distinct row per feature |
+
+**The design rule that makes v0.4 worth doing:** there is one implementation, and it is four
+functions. When v0.9's Predictor needs a feature the contract does not emit, the correct move is
+`schema_version = 2` and a retrained model — not a second transform beside this one.
+
+Next up is C6, the tokenizer, in v0.5. Gate **G2** stands between it and any tokenizer work.
 
 ## What v0.2 built
 

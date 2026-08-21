@@ -60,3 +60,9 @@ jobs:
       # well under the runner's disk and time budget.
       - run: uv sync --frozen --extra dev --extra train
       - run: uv run pytest -q
+
+      # The causality properties again, by marker. Not redundant: it is the marker that has to
+      # keep working, because v0.8's leakage tripwires select on it rather than on file names,
+      # and a marker that silently stops matching anything looks exactly like a passing suite.
+      - name: The causality audit, by marker
+        run: uv run pytest -q -m causality --no-header -p no:randomly

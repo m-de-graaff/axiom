@@ -525,6 +525,79 @@ future audit returns `split_adjusted`, the same command materializes the letter-
 If the command refuses because the sidecars carry more than one policy, run
 `just corpus job=audit` first and commit the verdict it produces.
 
+## The v0.4 preprocessing contract
+
+### The single-implementation rule
+
+`axiom.contract` exports four functions: `load_spec`, `load_constants`, `transform`, `inverse`.
+Every consumer — the v0.6 pre-tokenization job, the v0.9 Predictor, any notebook — uses those four.
+There is no second path, and a test asserts the package exports nothing else.
+
+If a consumer needs something the contract does not emit, that is a `schema_version` bump and a
+retrained model, not a helper beside the transform. Two implementations of a preprocessing step
+disagree eventually, and the disagreement is invisible: the model is simply evaluated on a
+distribution it never trained on, and every number after that is wrong by an unknown amount.
+
+### Regenerating the constants
+
+Allowed only when **both** hold: the firewall is unchanged, and `SCHEMA_VERSION` is bumped in the
+same change. The constants are part of the contract, so a refit invalidates the golden vectors, the
+regression snapshots, the tokenizer trained on the old features, and every shard downstream.
+
+```
+just contract job=fit            # dispatch to a GitHub runner
+just contract-watch
+just contract-fetch              # lands src/axiom/configs/contract_constants_v1.yaml
+```
+
+Two guards make an accident loud rather than silent. A run with `--limit` writes `partial: true`
+into the manifest, and a partial constants file **does not load** — `ContractConstants` refuses it
+during validation. A run that consumed a bar at or after the firewall refuses to write a file at
+all.
+
+### Reading the dryrun report
+
+`just contract job=dryrun` produces `docs/reports/v0.4-contract-qa.md`. Three numbers decide
+whether it passed:
+
+- **Prefix-consistency: must be N/N.** Anything else is a leak on real data that the synthetic
+  property battery did not reach, and it blocks G2 outright.
+- **NaN/Inf count: must be 0.** A NaN out of valid input is a bug in the contract, not a property
+  of the data.
+- **Clip rate per (spec, class, frequency, feature): under 0.5 %.** Above that, investigate in
+  writing before G2 closes — either the constants are wrong for that slice or the slice is
+  pathological, and v0.5 needs to know which before it picks quantizer ranges.
+
+The report also carries the geo-v1 against ret-v1 comparison. That is v0.5's input, not v0.4's
+decision: the A/B is settled by tokenizer reconstruction, not by which distribution looks tidier.
+
+### The live-fire drill
+
+The causality audit is worth exactly as much as its ability to fail. Twice a version — once when
+the contract changes and once before a gate — break it on purpose and watch it go red:
+
+```
+just contract-audit              # green, as a baseline
+# then make the median window forward-looking in rolling.py, rerun, watch it fail
+git checkout src/axiom/contract/rolling.py
+```
+
+Two variants of the drill exist as permanent tests, so the manual version is a check on the
+harness rather than the only evidence: `test_a_forward_looking_median_window_fails_prefix_consistency`
+and `test_the_leaky_spec_fails_prefix_consistency_by_construction`.
+
+Note what the audit does **not** catch, and do not let the drill teach the wrong lesson: a window
+that includes bar `t` itself stays prefix-consistent. Self-normalization leaks nothing from the
+future. That case is forbidden separately by the strictly-past window and caught by
+`test_the_window_ends_before_its_own_index`.
+
+### Regenerating the golden vectors
+
+`just contract-goldens`. A deliberate act — the diff on `tests/fixtures/contract/*.json` is the
+evidence for a schema bump, so a regeneration with no accompanying bump is a mistake being
+committed. The fixtures are checked twice: once against frozen output, and once against a second
+implementation written from ADR-0020's formulas rather than from `axiom.contract`.
+
 ## When a Kaggle session dies
 
 Sessions die on the 12-hour cap, on quota exhaustion, and occasionally for no stated reason. None

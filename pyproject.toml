@@ -71,5 +71,8 @@ include = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["slow: end-to-end drills that run a full loop"]
+markers = [
+    "slow: end-to-end drills that run a full loop",
+    "causality: the v0.4 contract's causal-by-construction properties; v0.8 re-runs these as leakage tripwires",
+]
 filterwarnings = ["ignore::DeprecationWarning"]

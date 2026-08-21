@@ -1,0 +1,15 @@
+# The per-field log-return contract: the A/B challenger (ADR-0005, ADR-0020).
+#
+# Six features per bar, from bar 1 of each segment onward:
+#   ret_open, ret_high, ret_low, ret_close   log(x_t / close_{t-1})
+#   volume, amount                           identical to geo-v1
+#
+# Identical in every respect a consumer can see -- same window, same clip, same emitted dtype,
+# same six columns -- so v0.5's reconstruction A/B measures the parameterization and nothing else.
+spec_id: ret-v1
+schema_version: 1
+parameterization: ret
+volume_window: 256
+clip_low: -5.0
+clip_high: 5.0
+leaky: false

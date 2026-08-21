@@ -7,7 +7,9 @@ argv, which is what makes a cloud result comparable to a local one.
 from __future__ import annotations
 
 import io
+import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
@@ -27,6 +29,7 @@ raw_app = typer.Typer(no_args_is_help=True, help="Inspect, verify and summarize 
 registry_app = typer.Typer(no_args_is_help=True, help="Build and query the corpus registry.")
 clean_app = typer.Typer(no_args_is_help=True, help="Kronos Algorithm 1 over the corpus (v0.3).")
 derive_app = typer.Typer(no_args_is_help=True, help="Build derived tiers from the raw one.")
+contract_app = typer.Typer(no_args_is_help=True, help="The v0.4 preprocessing contract (C5).")
 app.add_typer(config_app, name="config")
 app.add_typer(loop_app, name="loop")
 app.add_typer(universe_app, name="universe")
@@ -35,6 +38,7 @@ app.add_typer(raw_app, name="raw")
 app.add_typer(registry_app, name="registry")
 app.add_typer(clean_app, name="clean")
 app.add_typer(derive_app, name="derive")
+app.add_typer(contract_app, name="contract")
 
 
 def _csv(value: str) -> list[str]:
@@ -1446,3 +1450,267 @@ if (
     __name__ == "__main__"
 ):  # `python -m axiom.cli`, for kernels where the console script is not on PATH
     app()
+
+
+# --- the v0.4 preprocessing contract -----------------------------------------------------
+
+#: Both frozen specs. Every v0.4 corpus pass runs them together so the A/B compares two numbers
+#: measured over identical bars rather than two runs a week apart.
+CONTRACT_SPECS = ("contract_geo_v1", "contract_ret_v1")
+
+
+@dataclass(frozen=True)
+class _ArtifactPath:
+    """What `_bar_reader` needs of a ref, for a pass that works in segments rather than files."""
+
+    artifact_path: str
+
+
+def _segment_refs(store, dest: Path | None, clean_version: int):
+    from axiom.clean.run import clean_paths
+    from axiom.contract.corpus import group_by_artifact, read_segment_refs
+
+    paths = clean_paths(clean_version)
+    data = _read_from(store, dest, paths["segments"])
+    if data is None:
+        typer.echo(
+            f"no segment index at {paths['segments']}; run `axiom clean run` first", err=True
+        )
+        raise typer.Exit(2)
+    refs = read_segment_refs(data)
+    return refs, group_by_artifact(refs), paths
+
+
+def _clean_manifest(store, dest: Path | None, clean_version: int) -> dict:
+    from axiom.clean.run import clean_paths
+
+    data = _read_from(store, dest, clean_paths(clean_version)["manifest"])
+    return json.loads(data) if data else {}
+
+
+@contract_app.command("fit-constants")
+def contract_fit_constants(
+    dest: Annotated[
+        Path | None, typer.Option("--dest", help="Fit over a local raw tier instead of the Hub.")
+    ] = None,
+    out: Annotated[Path, typer.Option("--out", help="Where to write the constants YAML.")] = Path(
+        "src/axiom/configs/contract_constants_v1.yaml"
+    ),
+    clean_version: Annotated[int, typer.Option("--clean-version")] = 1,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", help="Fit over the first N artifacts. Smoke runs only."),
+    ] = None,
+    concurrency: Annotated[int, typer.Option("--concurrency")] = 16,
+    snapshot: Annotated[bool, typer.Option("--snapshot/--stream")] = True,
+) -> None:
+    """Fit the frozen scaling constants over pre-firewall bars, and write the committed file.
+
+    Streams every cleaned segment, truncated at `firewall_ts`, through both specs and keeps a
+    quantile sketch per (asset class, frequency, feature). The median becomes `center` and
+    IQR/1.349 becomes `scale`.
+
+    The firewall is enforced in code, not by convention: the job records the `max(ts)` it actually
+    consumed and writes the assertion's result into the manifest. A file whose manifest says the
+    assertion failed does not load at all (ADR-0021).
+    """
+    import datetime as dt
+
+    from axiom.contract.corpus import constants_tables, constants_yaml, fit_corpus
+    from axiom.contract.spec import SCHEMA_VERSION, firewall_sha256, load_firewall, load_spec
+
+    setup_logging()
+    specs = [load_spec(name) for name in CONTRACT_SPECS]
+    firewall = load_firewall()
+    store = _raw_store(dest)
+    refs, grouped, _ = _segment_refs(store, dest, clean_version)
+
+    paths = sorted(grouped)
+    partial = limit is not None and limit < len(paths)
+    if limit is not None:
+        grouped = {p: grouped[p] for p in paths[:limit]}
+
+    typer.echo(
+        f"{len(refs)} segment(s) in {len(grouped)} artifact(s); firewall "
+        f"{firewall.firewall_date_utc} ({firewall.firewall_ts})"
+    )
+    read, workers = _bar_reader(
+        store,
+        dest,
+        [_ArtifactPath(p) for p in grouped],
+        snapshot=snapshot,
+        concurrency=concurrency,
+    )
+    run = fit_corpus(
+        grouped,
+        lambda path: read(_ArtifactPath(path)),
+        specs,
+        firewall.firewall_ts,
+        concurrency=workers,
+        log=typer.echo,
+    )
+    typer.echo(run.line())
+    for failure in run.failures[:20]:
+        typer.echo(f"  FAILED {failure}", err=True)
+
+    respected = run.sketches.max_ts < firewall.firewall_ts
+    clean_manifest = _clean_manifest(store, dest, clean_version)
+    manifest = {
+        "generated_utc": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "git_commit": git_commit(),
+        "registry_hash": clean_manifest.get("registry_hash", ""),
+        "clean_config_hash": clean_manifest.get("clean_config_hash", ""),
+        "firewall_ts": firewall.firewall_ts,
+        "firewall_config_sha256": firewall_sha256(),
+        "firewall_respected": respected,
+        "segments_consumed": run.sketches.segments,
+        "bars_consumed": run.sketches.bars,
+        "partial": partial,
+    }
+    if not respected:
+        typer.echo(
+            f"FIREWALL BREACH: consumed a bar at {run.sketches.max_ts}, at or after "
+            f"{firewall.firewall_ts}. Refusing to write constants.",
+            err=True,
+        )
+        raise typer.Exit(2)
+
+    payload = constants_yaml(constants_tables(run.sketches, specs), manifest, SCHEMA_VERSION)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(payload)
+    typer.echo(f"wrote {out} ({len(payload)} bytes)")
+    if partial:
+        typer.echo(
+            "this was a partial fit; the file is marked partial: true and will not load",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
+@contract_app.command("dryrun")
+def contract_dryrun(
+    dest: Annotated[Path | None, typer.Option("--dest")] = None,
+    clean_version: Annotated[int, typer.Option("--clean-version")] = 1,
+    limit: Annotated[int | None, typer.Option("--limit")] = None,
+    concurrency: Annotated[int, typer.Option("--concurrency")] = 16,
+    snapshot: Annotated[bool, typer.Option("--snapshot/--stream")] = True,
+    report: Annotated[Path, typer.Option("--report", help="Where to write the QA report.")] = Path(
+        "docs/reports/v0.4-contract-qa.md"
+    ),
+    snapshots: Annotated[
+        Path, typer.Option("--snapshots", help="Where to write the pinned regression hashes.")
+    ] = Path("tests/snapshots/contract_v1.json"),
+    audit_segments: Annotated[int, typer.Option("--audit-segments")] = 50,
+    audit_splits: Annotated[int, typer.Option("--audit-splits")] = 3,
+) -> None:
+    """Stream the whole corpus through both specs, keeping only statistics.
+
+    Produces the feature-distribution report v0.5 designs its quantizer ranges against, the
+    corpus-level prefix-consistency audit on real bars, and the pinned regression hashes. No
+    feature row is written anywhere: v0.6 is what stores features.
+    """
+    from axiom.contract.corpus import (
+        dryrun_corpus,
+        pick_audit_segments,
+        quantile_rows,
+        usable_windows,
+    )
+    from axiom.contract.reports import contract_qa_markdown
+    from axiom.contract.spec import load_constants, load_spec
+
+    setup_logging()
+    specs = [load_spec(name) for name in CONTRACT_SPECS]
+    constants = load_constants()
+    store = _raw_store(dest)
+    refs, grouped, _ = _segment_refs(store, dest, clean_version)
+
+    paths = sorted(grouped)
+    partial = limit is not None and limit < len(paths)
+    if limit is not None:
+        grouped = {p: grouped[p] for p in paths[:limit]}
+
+    splits = pick_audit_segments(refs, n_segments=audit_segments, n_splits=audit_splits)
+    typer.echo(
+        f"{len(refs)} segment(s) in {len(grouped)} artifact(s); constants "
+        f"{constants.config_hash}; auditing {len(splits)} segment(s)"
+    )
+    read, workers = _bar_reader(
+        store,
+        dest,
+        [_ArtifactPath(p) for p in grouped],
+        snapshot=snapshot,
+        concurrency=concurrency,
+    )
+    result, hashes, failures = dryrun_corpus(
+        grouped,
+        lambda path: read(_ArtifactPath(path)),
+        specs,
+        constants,
+        audit_splits=splits,
+        concurrency=workers,
+        log=typer.echo,
+    )
+
+    windows = sum(usable_windows(r.n_bars) for r in refs)
+    markdown = contract_qa_markdown(
+        quantile_rows(result),
+        result,
+        constants=constants,
+        specs=specs,
+        usable_windows_512=windows,
+        snapshot_hashes=hashes,
+        failures=failures,
+        partial=partial,
+    )
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(markdown, encoding="utf-8")
+    snapshots.parent.mkdir(parents=True, exist_ok=True)
+    snapshots.write_text(json.dumps(hashes, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    typer.echo(markdown)
+    typer.echo(f"wrote {report} and {snapshots}")
+
+    if result.n_nan:
+        typer.echo(f"{result.n_nan} NaN/Inf in output -- that is a bug, not data", err=True)
+        raise typer.Exit(1)
+    if result.audits_run != result.audits_passed:
+        typer.echo(
+            f"prefix-consistency: {result.audits_passed}/{result.audits_run} -- G2 is not met",
+            err=True,
+        )
+        raise typer.Exit(1)
+    if failures:
+        for failure in failures[:20]:
+            typer.echo(f"  FAILED {failure}", err=True)
+        raise typer.Exit(1)
+
+
+@contract_app.command("show")
+def contract_show(
+    spec: Annotated[str, typer.Option("--spec")] = "contract_geo_v1",
+) -> None:
+    """Print a spec, its hash, and the slices the committed constants cover."""
+    from axiom.contract.spec import SCHEMA_VERSION, firewall_sha256, load_firewall, load_spec
+
+    loaded = load_spec(spec)
+    firewall = load_firewall()
+    typer.echo(f"{loaded.spec_id}  schema_version={SCHEMA_VERSION}  hash={loaded.config_hash}")
+    typer.echo(f"  features:      {', '.join(loaded.feature_names)}")
+    typer.echo(f"  volume window: {loaded.volume_window} bars, strictly past")
+    typer.echo(f"  clip:          [{loaded.clip_low}, {loaded.clip_high}]")
+    typer.echo(f"  leaky:         {loaded.leaky}")
+    typer.echo(f"firewall {firewall.firewall_date_utc} sha256={firewall_sha256()[:16]}...")
+    try:
+        from axiom.contract.spec import load_constants
+
+        constants = load_constants()
+    except FileNotFoundError:
+        typer.echo("constants: not fitted yet -- run `axiom contract fit-constants`")
+        return
+    typer.echo(f"constants {constants.config_hash}, fitted {constants.manifest.generated_utc}")
+    for asset_class, frequencies in sorted(constants.tables.get(loaded.spec_id, {}).items()):
+        for frequency, features in sorted(frequencies.items()):
+            row = "  ".join(
+                f"{name}={features[name].center:+.4f}/{features[name].scale:.4f}"
+                for name in loaded.feature_names
+            )
+            typer.echo(f"  {asset_class:<10} {frequency:<3} {row}")

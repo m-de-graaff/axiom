@@ -239,3 +239,40 @@ clean-report:
 # Build the derived total-return tier per the recorded adjustment verdict (ADR-0019).
 derive-tr *ARGS:
     uv run axiom derive tr {{ARGS}}
+
+# --- the v0.4 preprocessing contract ---
+
+# Print a spec, its hash, and the slices the committed constants cover.
+contract-show spec="contract_geo_v1":
+    uv run axiom contract show --spec {{spec}}
+
+# The causality audit on its own, by marker. What v0.8 re-runs as a leakage tripwire.
+contract-audit:
+    uv run pytest -q -m causality
+
+# Regenerate the golden fixtures. Deliberate act: the diff is the evidence for a schema bump.
+contract-goldens:
+    uv run python tests/contract_golden_build.py
+
+# Fit the frozen constants and stream the corpus, on a GitHub runner.
+contract job="both" *ARGS:
+    gh workflow run contract.yml -f job={{job}} {{ARGS}}
+
+# Smoke run: two hundred artifacts through both passes. Will not publish -- partial fits refuse.
+contract-smoke:
+    gh workflow run contract.yml -f job=fit -f limit=200
+
+contract-watch:
+    gh run watch $(gh run list --workflow=contract.yml --limit 1 --json databaseId -q '.[0].databaseId') --exit-status
+
+contract-log:
+    gh run view $(gh run list --workflow=contract.yml --limit 1 --json databaseId -q '.[0].databaseId') --log
+
+# Fetch the constants, the report and the snapshot hashes into the paths they belong in.
+contract-fetch:
+    gh run download $(gh run list --workflow=contract.yml --limit 1 --json databaseId -q '.[0].databaseId') -n contract-outputs -D .
+
+# Run both passes over a local raw tier instead, for development.
+contract-local dest=".artifacts/raw-local":
+    uv run axiom contract fit-constants --dest {{dest}}
+    uv run axiom contract dryrun --dest {{dest}}

@@ -136,6 +136,19 @@ The derived total-return tier is the one thing that *could* have needed space, a
 measured adjustment verdict it needs none — `tr_close` equals `close`, so `axiom derive tr` writes
 a coverage manifest and no bar files (ADR-0019).
 
+## v0.4 created no new online infrastructure
+
+Third time, and the reason is different from the last two. v0.4 *does* stream the whole corpus,
+twice, and it *does* produce numbers that everything downstream depends on — but the outputs are a
+few kilobytes of YAML, a report, and five hashes, and all three belong in git rather than on the
+Hub. Constants are part of the contract, so they are versioned with the code that uses them; a
+constants file in a dataset repo could drift from the transform that reads it, which is the exact
+failure `schema_version` exists to prevent.
+
+Feature rows are not stored anywhere in v0.4. The Phase E dryrun computes forty million of them
+and discards every one. v0.6 is what stores features, in `axiom-tokenized`, and it is the version
+that adds the next row to the table above.
+
 ## Layout inside `axiom-raw`
 
 ```

@@ -1,0 +1,19 @@
+# The candle-geometry contract: the designated primary parameterization (ADR-0005, ADR-0020).
+#
+# Six features per bar, from bar 1 of each segment onward:
+#   gap    log(open_t / close_{t-1})   where the bar opened relative to the last close
+#   body   log(close_t / open_t)       what the bar did
+#   upper  log(high_t / open_t)        >= max(0, body), by construction
+#   lower  log(low_t / open_t)         <= min(0, body), by construction
+#   volume log1p(volume_t) - median of log1p(volume) over the strictly-past window
+#   amount the same, on quote volume
+#
+# The structural identities are the reason this is the primary: four independent log-returns
+# spend model capacity relearning that high is above low.
+spec_id: geo-v1
+schema_version: 1
+parameterization: geo
+volume_window: 256
+clip_low: -5.0
+clip_high: 5.0
+leaky: false
