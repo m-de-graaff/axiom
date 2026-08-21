@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -184,6 +185,27 @@ def write_parquet(table: pa.Table, metadata: dict[bytes, bytes]) -> bytes:
     return buffer.getvalue()
 
 
+#: Bars the dollar-volume statistic is measured over. One trading year, matching what the
+#: equities universe ranks on (ADR-0016).
+DOLLAR_VOLUME_WINDOW = 252
+
+
+def median_dollar_volume(table: pa.Table, *, window: int = DOLLAR_VOLUME_WINDOW) -> float:
+    """Median of `close x volume` over the last ``window`` bars.
+
+    Median rather than mean, so one earnings-day spike cannot carry a series; dollar volume
+    rather than share volume, because a hundred shares of one instrument and a hundred of another
+    are not comparable quantities.
+    """
+    if table.num_rows == 0:
+        return 0.0
+    close = table["close"].to_numpy(zero_copy_only=False)[-window:]
+    volume = table["volume"].to_numpy(zero_copy_only=False)[-window:]
+    dollar = close.astype(np.float64) * volume.astype(np.float64)
+    finite = dollar[np.isfinite(dollar)]
+    return float(np.median(finite)) if finite.size else 0.0
+
+
 def shard_dir(symbol: str) -> str:
     """The letter bucket a symbol's file lands in (ADR-0016).
 
@@ -293,6 +315,7 @@ def pull_item(
             gap_count=count_gaps(ts, item.frequency),
             off_grid_count=count_off_grid(ts, item.frequency),
             closed_window_count=count_closed_window(ts, item.session_id, item.frequency),
+            median_dollar_volume=median_dollar_volume(table),
             source_symbol=item.vendor_symbol,
             universe_hash=universe_hash,
             **source.manifest_extras(item),

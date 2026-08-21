@@ -222,14 +222,15 @@ def universe_build_equities(
     dest: Annotated[
         Path | None, typer.Option("--dest", help="Build over a local raw tier instead.")
     ] = None,
-    concurrency: Annotated[int, typer.Option("--concurrency")] = 16,
 ) -> None:
-    """Build the equities training universe from the pulled corpus (ADR-0016 criteria).
+    """Build the equities training universe from the registry (ADR-0016 criteria).
 
-    Two passes on purpose. The history filter is answered from the registry — eighteen thousand
-    rows of metadata, no downloads — and only the survivors are fetched to compute the ranking
-    metric. Ranking first would pull every artifact in the tier to sort a list that discards
-    most of them.
+    Downloads nothing. Both the history filter and the dollar-volume ranking are answered from
+    the registry, because each series' median dollar volume was computed at pull time, when its
+    bars were already in memory. An earlier version fetched every candidate's Parquet from the
+    Hub to rank it; the Hub answers a burst of Parquet reads with backoff demands measured in
+    minutes, so that is roughly 38 hours of waiting for 6 829 candidates and it measured a fifth
+    of them before giving up.
 
     The pulled corpus stays a superset of the result. This governs sampling from v0.5 onward,
     never what is stored.
@@ -254,14 +255,12 @@ def universe_build_equities(
     recorded_hash = registry_metadata(registry).get("axiom_registry_hash", "")
 
     universe = build_equity_universe(
-        store,
         registry,
         registry_hash=recorded_hash,
         generated_at=datetime.now(UTC).date().isoformat(),
         min_history_years=min_history_years,
         top_n=top_n,
         window=window,
-        concurrency=concurrency,
     )
     if not universe.symbols:
         typer.echo("no ticker cleared the criteria; is the equities tier populated?", err=True)

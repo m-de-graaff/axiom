@@ -1,61 +1,34 @@
 """The equities training universe.
 
-The one universe in the project with a builder that reads the corpus, so the tests are about the
-two things that makes fragile: that the cheap filter really runs before the expensive one, and
-that the result is reproducible enough to commit.
+It reads the registry and downloads nothing: each series' median dollar volume was computed at
+pull time, when its bars were already in memory. So the tests are about the two things that makes
+fragile — that a candidate whose statistic is missing is treated as *unmeasured* rather than as
+worthless, and that the result is reproducible enough to commit.
 """
 
 from __future__ import annotations
 
-import io
-
 import numpy as np
 import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
 
 from axiom.registry import build_from_manifests
+from axiom.sources.base import median_dollar_volume
 from axiom.universe.equities import (
     Candidate,
     EquityUniverse,
+    IncompleteRanking,
     build_equity_universe,
     candidates_from_registry,
     load_equity_universe,
-    median_dollar_volume,
     rank_candidates,
 )
 from tests.test_registry import manifest
 
 DAY_MS = 86_400_000
-JAN_2024 = 1_704_067_200_000
 
 
-class FakeStore:
-    """A store holding pre-built Parquet bytes, and counting who asked for what."""
-
-    def __init__(self, series: dict[str, tuple[list[float], list[float]]]) -> None:
-        self.reads: list[str] = []
-        self._data = {
-            path: self._parquet(close, volume) for path, (close, volume) in series.items()
-        }
-
-    @staticmethod
-    def _parquet(close: list[float], volume: list[float]) -> bytes:
-        buffer = io.BytesIO()
-        pq.write_table(
-            pa.table(
-                {"close": pa.array(close, pa.float64()), "volume": pa.array(volume, pa.float64())}
-            ),
-            buffer,
-        )
-        return buffer.getvalue()
-
-    def get(self, artifact_path: str) -> bytes | None:
-        self.reads.append(artifact_path)
-        return self._data.get(artifact_path)
-
-
-def equity(symbol: str, *, days: int) -> object:
+def equity(symbol: str, *, days: int, dollar_volume: float = 1000.0):
     return manifest(
         source="stooq",
         market="us",
@@ -64,6 +37,7 @@ def equity(symbol: str, *, days: int) -> object:
         frequency="1d",
         rows=days,
         days=days,
+        median_dollar_volume=dollar_volume,
     )
 
 
@@ -71,13 +45,18 @@ def registry_of(*manifests):
     return build_from_manifests(list(manifests), sizes={}).table
 
 
+def bars(close: list[float], volume: list[float]) -> pa.Table:
+    return pa.table(
+        {"close": pa.array(close, pa.float64()), "volume": pa.array(volume, pa.float64())}
+    )
+
+
 # --- the history filter ---------------------------------------------------------------------
 
 
 def test_only_series_with_enough_history_become_candidates():
     table = registry_of(equity("OLD", days=3000), equity("NEW", days=400))
-    candidates = candidates_from_registry(table, min_history_years=5)
-    assert [c.symbol for c in candidates] == ["OLD"]
+    assert [c.symbol for c in candidates_from_registry(table, min_history_years=5)] == ["OLD"]
 
 
 def test_other_sources_are_never_candidates():
@@ -108,79 +87,65 @@ def test_candidates_come_back_sorted():
     assert [c.symbol for c in candidates_from_registry(table)] == ["AAA", "ZZZ"]
 
 
-# --- the ranking metric ---------------------------------------------------------------------
+def test_the_dollar_volume_comes_along_from_the_registry():
+    table = registry_of(equity("AAA", days=3000, dollar_volume=12345.0))
+    assert candidates_from_registry(table)[0].median_dollar_volume == 12345.0
+
+
+def test_a_sidecar_predating_the_field_reads_as_unmeasured_not_as_zero():
+    """A stale registry must be caught by the guard, not silently ranked at the bottom."""
+    table = registry_of(equity("OLD", days=3000, dollar_volume=0.0))
+    assert candidates_from_registry(table)[0].median_dollar_volume is None
+
+
+# --- the ranking metric, computed at pull time ------------------------------------------------
 
 
 def test_dollar_volume_is_price_times_shares():
-    table = pa.table({"close": pa.array([10.0, 10.0]), "volume": pa.array([100.0, 100.0])})
-    assert median_dollar_volume(table) == 1000.0
+    assert median_dollar_volume(bars([10.0, 10.0], [100.0, 100.0])) == 1000.0
 
 
 def test_the_median_resists_a_single_spike():
     """One earnings day should not carry a ticker into the universe."""
-    close = [10.0] * 100
-    volume = [100.0] * 99 + [1_000_000.0]
-    table = pa.table({"close": pa.array(close), "volume": pa.array(volume)})
-    assert median_dollar_volume(table) == 1000.0
+    assert median_dollar_volume(bars([10.0] * 100, [100.0] * 99 + [1_000_000.0])) == 1000.0
 
 
 def test_only_the_ranking_window_counts():
     """Liquid in 2009 is not liquid, and the window is what says so."""
-    close = [10.0] * 300
-    volume = [1_000_000.0] * 48 + [100.0] * 252
-    table = pa.table({"close": pa.array(close), "volume": pa.array(volume)})
+    table = bars([10.0] * 300, [1_000_000.0] * 48 + [100.0] * 252)
     assert median_dollar_volume(table, window=252) == 1000.0
 
 
 def test_non_finite_rows_do_not_poison_the_median():
-    table = pa.table(
-        {"close": pa.array([10.0, 10.0, np.nan]), "volume": pa.array([100.0, 100.0, 100.0])}
-    )
-    assert median_dollar_volume(table) == 1000.0
+    assert median_dollar_volume(bars([10.0, 10.0, np.nan], [100.0, 100.0, 100.0])) == 1000.0
 
 
-def test_an_empty_series_ranks_at_zero_rather_than_raising():
-    assert (
-        median_dollar_volume(
-            pa.table({"close": pa.array([], pa.float64()), "volume": pa.array([], pa.float64())})
-        )
-        == 0.0
-    )
+def test_an_empty_series_measures_zero_rather_than_raising():
+    assert median_dollar_volume(bars([], [])) == 0.0
 
 
-# --- ranking --------------------------------------------------------------------------------
+# --- ranking ----------------------------------------------------------------------------------
+
+
+def candidate(symbol: str, value: float | None) -> Candidate:
+    return Candidate(symbol, f"raw/stooq/us/1d/{symbol}.parquet", 3000.0, value)
 
 
 def test_ranking_is_descending_by_dollar_volume():
-    store = FakeStore(
-        {
-            "a.parquet": ([10.0] * 300, [100.0] * 300),
-            "b.parquet": ([10.0] * 300, [900.0] * 300),
-        }
-    )
-    candidates = [Candidate("AAA", "a.parquet", 2000.0), Candidate("BBB", "b.parquet", 2000.0)]
-    assert [s for s, _ in rank_candidates(store, candidates).ranked] == ["BBB", "AAA"]
+    ranking = rank_candidates([candidate("AAA", 100.0), candidate("BBB", 900.0)])
+    assert [s for s, _ in ranking.ranked] == ["BBB", "AAA"]
 
 
 def test_ties_break_on_the_symbol_so_the_order_is_total():
     """Two runs a year apart must not disagree about a coin flip."""
-    store = FakeStore(
-        {"a.parquet": ([10.0] * 300, [100.0] * 300), "b.parquet": ([10.0] * 300, [100.0] * 300)}
-    )
-    candidates = [Candidate("ZZZ", "b.parquet", 2000.0), Candidate("AAA", "a.parquet", 2000.0)]
-    assert [s for s, _ in rank_candidates(store, candidates).ranked] == ["AAA", "ZZZ"]
+    ranking = rank_candidates([candidate("ZZZ", 100.0), candidate("AAA", 100.0)])
+    assert [s for s, _ in ranking.ranked] == ["AAA", "ZZZ"]
 
 
-def test_a_series_that_cannot_be_read_is_unrankable_not_worthless():
+def test_an_unmeasured_candidate_is_unrankable_not_worthless():
     """The bug this replaced: a failed read returned 0.0, the `> 0` cut discarded it, and a Hub
-    429 became 'this stock has no volume'. One real run measured 978 of ~9 000 candidates and
-    reported all 978 as kept."""
-    store = FakeStore({"a.parquet": ([10.0] * 300, [100.0] * 300)})
-    candidates = [
-        Candidate("AAA", "a.parquet", 2000.0),
-        Candidate("GONE", "missing.parquet", 2000.0),
-    ]
-    ranking = rank_candidates(store, candidates, sleep=lambda _: None)
+    429 became 'this stock has no volume'. One real run measured 1 344 of 6 829 candidates."""
+    ranking = rank_candidates([candidate("AAA", 100.0), candidate("GONE", None)])
     assert [s for s, _ in ranking.ranked] == ["AAA"]
     assert ranking.unrankable == ["GONE"]
     assert ranking.zero_volume == []
@@ -188,73 +153,28 @@ def test_a_series_that_cannot_be_read_is_unrankable_not_worthless():
 
 def test_a_genuinely_untraded_series_is_zero_volume_not_unrankable():
     """The other half of the distinction: measured, and the answer was nothing."""
-    store = FakeStore({"a.parquet": ([10.0] * 300, [0.0] * 300)})
-    ranking = rank_candidates(store, [Candidate("AAA", "a.parquet", 2000.0)], sleep=lambda _: None)
+    ranking = rank_candidates([candidate("AAA", 0.0)])
     assert ranking.zero_volume == ["AAA"]
     assert ranking.unrankable == []
 
 
 def test_a_universe_is_refused_when_too_much_could_not_be_measured():
     """A universe built on the tenth of the market that answered is not a smaller universe."""
-    from axiom.universe.equities import IncompleteRanking
-
-    table = registry_of(*[equity(f"S{i:04d}", days=3000) for i in range(50)])
-    store = FakeStore({"raw/stooq/us/1d/S0000.parquet": ([10.0] * 300, [100.0] * 300)})
+    table = registry_of(*[equity(f"S{i:04d}", days=3000, dollar_volume=0.0) for i in range(50)])
     with pytest.raises(IncompleteRanking, match="could not be measured"):
-        build_equity_universe(
-            store, table, registry_hash="r", generated_at="2026-08-21", top_n=3000
-        )
+        build_equity_universe(table, registry_hash="r", generated_at="2026-08-21", top_n=3000)
 
 
-def test_a_transient_read_error_is_retried_before_being_called_unrankable():
-    """The Hub rate-limits reads; a 429 on candidate nine thousand is not a fact about it."""
-    from axiom.universe.equities import read_dollar_volume
-
-    class FlakyStore(FakeStore):
-        def __init__(self, series, fail_times):
-            super().__init__(series)
-            self.remaining = fail_times
-
-        def get(self, artifact_path):
-            if self.remaining:
-                self.remaining -= 1
-                raise RuntimeError("429 Too Many Requests")
-            return super().get(artifact_path)
-
-    store = FlakyStore({"a.parquet": ([10.0] * 300, [100.0] * 300)}, fail_times=2)
-    value = read_dollar_volume(store, Candidate("AAA", "a.parquet", 2000.0), sleep=lambda _: None)
-    assert value == 1000.0
-
-
-def test_only_candidates_are_ever_downloaded():
-    """The whole point of filtering on the registry first."""
-    table = registry_of(equity("OLD", days=3000), equity("NEW", days=400))
-    store = FakeStore({"raw/stooq/us/1d/OLD.parquet": ([10.0] * 300, [100.0] * 300)})
-    build_equity_universe(store, table, registry_hash="abc123", generated_at="2026-08-20", top_n=10)
-    assert store.reads == ["raw/stooq/us/1d/OLD.parquet"]
-
-
-def test_the_file_records_what_could_not_be_measured():
-    """Zero here is what makes the universe mean what it says."""
-    universe = built()
-    assert universe.candidates_unrankable == 0
-    assert universe.candidates_considered == 2
-
-
-# --- the built file ---------------------------------------------------------------------------
+# --- the built file -----------------------------------------------------------------------------
 
 
 def built() -> EquityUniverse:
-    table = registry_of(equity("AAA", days=3000), equity("BBB", days=3000), equity("NEW", days=100))
-    store = FakeStore(
-        {
-            "raw/stooq/us/1d/AAA.parquet": ([10.0] * 300, [100.0] * 300),
-            "raw/stooq/us/1d/BBB.parquet": ([10.0] * 300, [900.0] * 300),
-        }
+    table = registry_of(
+        equity("AAA", days=3000, dollar_volume=100.0),
+        equity("BBB", days=3000, dollar_volume=900.0),
+        equity("NEW", days=100, dollar_volume=500.0),
     )
-    return build_equity_universe(
-        store, table, registry_hash="reg123", generated_at="2026-08-20", top_n=1
-    )
+    return build_equity_universe(table, registry_hash="reg123", generated_at="2026-08-21", top_n=1)
 
 
 def test_the_cut_keeps_the_top_n_and_records_what_it_considered():
@@ -264,11 +184,16 @@ def test_the_cut_keeps_the_top_n_and_records_what_it_considered():
     assert universe.candidates_considered == 2
 
 
+def test_the_file_records_what_could_not_be_measured():
+    """Zero here is what makes the universe mean what it says."""
+    assert built().candidates_unrankable == 0
+
+
 def test_the_criteria_and_the_registry_hash_are_echoed():
     """Without the snapshot, 'top N by dollar volume' names a procedure, not a result."""
     universe = built()
     assert universe.criteria.registry_hash == "reg123"
-    assert universe.criteria.generated_at == "2026-08-20"
+    assert universe.criteria.generated_at == "2026-08-21"
     assert universe.criteria.top_n == 1
 
 

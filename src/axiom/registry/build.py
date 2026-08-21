@@ -59,6 +59,7 @@ REGISTRY_SCHEMA = pa.schema(
         pa.field("gap_count", pa.int64(), nullable=False),
         pa.field("off_grid_count", pa.int64(), nullable=False),
         pa.field("closed_window_count", pa.int64(), nullable=False),
+        pa.field("median_dollar_volume", pa.float64(), nullable=False),
         pa.field("price_side", pa.string(), nullable=False),
         pa.field("volume_convention", pa.string(), nullable=False),
         pa.field("amount_synthesized", pa.bool_(), nullable=False),
@@ -112,6 +113,7 @@ def manifest_row(manifest: FileManifest, *, artifact_bytes: int = 0) -> dict[str
     row["history_days"] = round((manifest.last_ts - manifest.first_ts) / MS_PER_DAY, 3)
     row["artifact_bytes"] = int(artifact_bytes)
     row["closed_window_count"] = int(manifest.closed_window_count)
+    row["median_dollar_volume"] = float(manifest.median_dollar_volume)
     for name in _LIST_FIELDS:
         row.pop(name, None)
     return row

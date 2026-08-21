@@ -58,6 +58,7 @@ V02_DEFAULTED_FIELDS: dict[str, Any] = {
     "price_side": "trade",
     "redistribution_class": "loader_manifest_private_cache",
     "closed_window_count": 0,
+    "median_dollar_volume": 0.0,
 }
 
 
@@ -93,6 +94,14 @@ class FileManifest(BaseModel):
     #: Bars whose open time is not on the frequency grid. Real bars from an exchange restart,
     #: counted rather than repaired (ADR-0010).
     off_grid_count: int = 0
+    #: Median of `close x volume` over the series' last 252 bars, or 0.0 when it has none.
+    #:
+    #: A per-series statistic like the gap counts beside it, and it lives here for the same
+    #: reason: so a question about the whole corpus costs a registry query instead of a download.
+    #: The equities universe ranks on this. Computing it by reading 6 829 Parquet files from the
+    #: Hub took 38 hours of rate-limited backoff to not finish; computing it once, at the moment
+    #: the bars are already in memory, costs nothing.
+    median_dollar_volume: float = 0.0
     #: Bars falling when a session-bound market was normally shut. Zero for 24x7 sources. For
     #: Dukascopy this is mostly the vendor's flat zero-volume weekend padding, and it is recorded
     #: here so v0.3 can size the problem without re-reading four million bars (ADR-0015).

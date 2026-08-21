@@ -17,24 +17,18 @@ later universe does not get deleted, and one that was never in it is still there
 from __future__ import annotations
 
 import hashlib
-import io
 import logging
-import time
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pyarrow as pa
-import pyarrow.parquet as pq
 import yaml
 from pydantic import BaseModel, ConfigDict
 
 from axiom.config.hashing import SHORT_LEN, canonical_json
 from axiom.config.settings import resolve_config_path
-from axiom.raw.store import RawStore
 
 log = logging.getLogger("axiom.universe.equities")
 
@@ -142,6 +136,9 @@ class Candidate:
     symbol: str
     artifact_path: str
     history_days: float
+    #: From the manifest, via the registry. ``None`` when the sidecar predates the field, which
+    #: means the series must be re-pulled before it can be ranked -- not that it is worthless.
+    median_dollar_volume: float | None = None
 
 
 def candidates_from_registry(
@@ -159,7 +156,15 @@ def candidates_from_registry(
     needed_days = min_history_years * 365.25
     rows = registry.to_pylist()
     candidates = [
-        Candidate(r["symbol"], r["artifact_path"], r["history_days"])
+        Candidate(
+            r["symbol"],
+            r["artifact_path"],
+            r["history_days"],
+            # A registry built before the field existed reports 0.0, which is indistinguishable
+            # from a genuinely untraded series. Treat it as unmeasured so the guard below catches
+            # a stale registry instead of emitting a universe ranked on nothing.
+            r.get("median_dollar_volume") if r.get("median_dollar_volume") else None,
+        )
         for r in rows
         if r["source"] == source
         and r["frequency"] == frequency
@@ -195,10 +200,10 @@ def median_dollar_volume(table: pa.Table, *, window: int = RANKING_WINDOW_DAYS) 
 class Ranking:
     """What ranking the candidates produced, including what it could not measure.
 
-    ``unrankable`` is the field that matters. An earlier version returned 0.0 for a ticker whose
-    download failed, which the ``> 0`` cut then silently discarded -- so a Hugging Face 429
-    became "this stock has no volume" and a run that measured 978 of roughly 9 000 candidates
-    reported them all as kept. A failure must never be representable as a ranking.
+    ``unrankable`` is the field that matters. An earlier version returned 0.0 for a candidate it
+    could not measure, which the ``> 0`` cut then silently discarded -- so a Hub 429 became "this
+    stock has no volume", and a run that measured 978 of 6 829 candidates reported them all as
+    kept. A failure must never be representable as a ranking.
     """
 
     ranked: list[tuple[str, float]] = field(default_factory=list)
@@ -216,70 +221,28 @@ class Ranking:
         return len(self.unrankable) / self.attempted if self.attempted else 0.0
 
 
-def read_dollar_volume(
-    store: RawStore,
-    candidate: Candidate,
-    *,
-    window: int = RANKING_WINDOW_DAYS,
-    attempts: int = 4,
-    sleep: Callable[[float], None] = time.sleep,
-) -> float | None:
-    """One candidate's median dollar volume, or ``None`` when it could not be measured.
+def rank_candidates(candidates: list[Candidate]) -> Ranking:
+    """Rank by the dollar volume each candidate's manifest already recorded.
 
-    Retries because the Hub rate-limits reads as readily as it rate-limits commits, and a 429 on
-    ticker nine thousand is not a fact about that ticker. Returning ``None`` rather than 0.0 is
-    the point: the caller must be unable to confuse "did not trade" with "did not answer".
-    """
-    for attempt in range(attempts):
-        try:
-            data = store.get(candidate.artifact_path)
-            if data is None:
-                return None
-            table = pq.read_table(io.BytesIO(data), columns=["close", "volume"])
-            return median_dollar_volume(table, window=window)
-        except Exception as exc:
-            if attempt + 1 == attempts:
-                log.warning(
-                    "could not rank %s after %d attempts: %s", candidate.symbol, attempts, exc
-                )
-                return None
-            sleep(0.5 * (2**attempt))
-    return None
-
-
-def rank_candidates(
-    store: RawStore,
-    candidates: list[Candidate],
-    *,
-    window: int = RANKING_WINDOW_DAYS,
-    concurrency: int = 8,
-    sleep: Callable[[float], None] = time.sleep,
-) -> Ranking:
-    """Download each candidate's close and volume columns and rank by median dollar volume.
+    This used to download every candidate's Parquet from the Hub. That does not scale and cannot
+    be tuned into scaling: the Hub answers a burst of Parquet reads with 160-to-284-second
+    backoff demands, so 6 829 files is roughly 38 hours of waiting, and the run that tried it
+    measured a fifth of them. The statistic is now computed once at pull time, when the bars are
+    already in memory, and read from the registry here. Nothing is downloaded.
 
     Ties break on the symbol, so the ordering is total. Two tickers with identical median dollar
-    volume is unlikely and "unlikely" is exactly what makes a supposedly reproducible file differ
+    volume is unlikely, and "unlikely" is exactly what makes a supposedly reproducible file differ
     between two runs a year apart.
-
-    Concurrency is deliberately lower than the registry's. This reads a whole Parquet per
-    candidate rather than a few hundred bytes of JSON, across thousands of them, and the Hub
-    starts refusing well before the thread pool notices.
     """
-
-    def measure(candidate: Candidate) -> tuple[str, float | None]:
-        return candidate.symbol, read_dollar_volume(store, candidate, window=window, sleep=sleep)
-
-    with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="rank") as pool:
-        measured = list(pool.map(measure, candidates))
-
     result = Ranking()
-    for symbol, value in measured:
+    for candidate in candidates:
+        value = candidate.median_dollar_volume
         if value is None:
-            result.unrankable.append(symbol)
+            result.unrankable.append(candidate.symbol)
         elif value > 0.0:
-            result.ranked.append((symbol, value))
+            result.ranked.append((candidate.symbol, value))
         else:
-            result.zero_volume.append(symbol)
+            result.zero_volume.append(candidate.symbol)
     result.ranked.sort(key=lambda pair: (-pair[1], pair[0]))
     return result
 
@@ -289,7 +252,6 @@ class IncompleteRanking(RuntimeError):
 
 
 def build_equity_universe(
-    store: RawStore,
     registry: pa.Table,
     *,
     registry_hash: str,
@@ -297,7 +259,6 @@ def build_equity_universe(
     min_history_years: int = MIN_HISTORY_YEARS,
     top_n: int = TOP_N,
     window: int = RANKING_WINDOW_DAYS,
-    concurrency: int = 8,
     max_unrankable_fraction: float = 0.01,
 ) -> EquityUniverse:
     """Filter by history, rank by dollar volume, cut to the top N.
@@ -308,7 +269,7 @@ def build_equity_universe(
     a wrong one -- and a month later it would be indistinguishable from a correct one.
     """
     candidates = candidates_from_registry(registry, min_history_years=min_history_years)
-    ranking = rank_candidates(store, candidates, window=window, concurrency=concurrency)
+    ranking = rank_candidates(candidates)
 
     log.info(
         "%d candidates, %d ranked, %d with no volume, %d unrankable; keeping the top %d",
@@ -322,9 +283,9 @@ def build_equity_universe(
         raise IncompleteRanking(
             f"{len(ranking.unrankable)} of {ranking.attempted} candidates could not be measured "
             f"({ranking.unrankable_fraction:.1%}, over the {max_unrankable_fraction:.0%} "
-            "tolerance). This is almost always the Hub rate-limiting reads; re-run, and lower "
-            "--concurrency if it persists. Refusing to emit a universe built on the fraction "
-            "that answered."
+            "tolerance). Every candidate whose sidecar predates `median_dollar_volume` reports "
+            "as unmeasured, so this almost always means the tier needs re-pulling and the "
+            "registry rebuilding. Refusing to emit a universe ranked on the fraction that has it."
         )
 
     universe = EquityUniverse(
