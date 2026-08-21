@@ -7,6 +7,7 @@ functions, and nothing routes around them.
 from __future__ import annotations
 
 import ast
+import math
 import types
 from pathlib import Path
 
@@ -14,7 +15,7 @@ import numpy as np
 import pytest
 
 import axiom.contract as contract
-from axiom.contract import SCHEMA_VERSION, inverse, load_spec, transform
+from axiom.contract import SCHEMA_VERSION, inverse, load_constants, load_spec, transform
 from axiom.contract.rolling import strictly_past_median
 from axiom.contract.spec import ContractConstants, ContractSpec, firewall_sha256, load_firewall
 from axiom.contract.transform import ContractError
@@ -183,6 +184,69 @@ def test_the_firewall_config_hashes_to_what_adr_0021_records() -> None:
     assert firewall.firewall_ts == 1_735_689_600_000
     assert firewall.firewall_date_utc == "2025-01-01T00:00:00Z"
     assert firewall_sha256() == "94dd8b5072b01f746c03537450b6559180f21e87e3031fe22daad6c04719e871"
+
+
+#: Every (asset class, frequency) the M0 corpus actually holds. US equities are daily only
+#: (ADR-0016), so a `equity/1h` row in the constants would mean the fit invented one.
+CORPUS_SLICES = (
+    ("crypto", "1h"),
+    ("crypto", "1d"),
+    ("fx", "1h"),
+    ("fx", "1d"),
+    ("commodity", "1h"),
+    ("commodity", "1d"),
+    ("equity", "1d"),
+)
+
+
+@pytest.mark.parametrize("spec_name", ["contract_geo_v1", "contract_ret_v1"])
+def test_the_committed_constants_cover_every_slice_of_the_corpus(spec_name: str) -> None:
+    """The Phase B output, checked as data rather than trusted as a build artifact."""
+    spec = load_spec(spec_name)
+    table = load_constants()
+
+    for asset_class, frequency in CORPUS_SLICES:
+        scaling = table.scaling_for(spec, asset_class, frequency)
+        assert len(scaling) == 6
+        assert all(s.scale > 0 and math.isfinite(s.scale) for s in scaling)
+
+
+@pytest.mark.parametrize("frequency", ["1h", "1d"])
+def test_the_fitted_wicks_are_one_sided(frequency: str) -> None:
+    """`upper` sits above zero and `lower` below it, in every slice.
+
+    It follows from `high >= open >= low`, so a violation means the fit wrote the columns in the
+    wrong order — a bug that leaves six plausible numbers per slice and no other symptom.
+    """
+    spec = load_spec("contract_geo_v1")
+    table = load_constants()
+
+    for asset_class, freq in CORPUS_SLICES:
+        if freq != frequency:
+            continue
+        by_name = dict(
+            zip(spec.feature_names, table.scaling_for(spec, asset_class, freq), strict=True)
+        )
+        assert by_name["upper"].center > 0, asset_class
+        assert by_name["lower"].center < 0, asset_class
+
+
+@pytest.mark.parametrize("frequency", ["1h", "1d"])
+def test_crypto_is_fitted_wider_than_fx_at_the_same_frequency(frequency: str) -> None:
+    """A spot-check on the fit against what anybody who has looked at a chart expects.
+
+    Not a property of the contract — a property of the market, asserted because if it ever fails
+    the likely cause is a slice label crossing wires somewhere between the registry and the fit.
+    """
+    spec = load_spec("contract_geo_v1")
+    table = load_constants()
+
+    crypto = dict(
+        zip(spec.feature_names, table.scaling_for(spec, "crypto", frequency), strict=True)
+    )
+    fx = dict(zip(spec.feature_names, table.scaling_for(spec, "fx", frequency), strict=True))
+
+    assert crypto["body"].scale > fx["body"].scale
 
 
 #: What the contract may import at module scope. Anything that reads a file or opens a socket
