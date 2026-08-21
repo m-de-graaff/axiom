@@ -1119,6 +1119,10 @@ def clean_run(
             help="Fetch the bar tier once, then clean offline. --stream downloads per artifact.",
         ),
     ] = True,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Publish even when --limit means this is a partial run."),
+    ] = False,
 ) -> None:
     """Clean every bar artifact in the registry into one segment index.
 
@@ -1153,6 +1157,7 @@ def clean_run(
         raise typer.Exit(2)
     registry = read_registry(registry_bytes)
     refs = bar_artifacts(registry)
+    partial = limit is not None and limit < len(refs)
     if limit is not None:
         refs = refs[:limit]
 
@@ -1181,7 +1186,19 @@ def clean_run(
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from None
 
-    for path, payload in write_outputs(run).items():
+    outputs = write_outputs(run)
+    if partial and not force:
+        # A smoke run must not become the corpus. `clean/v1/` is what every downstream consumer
+        # reads, and overwriting it with fifty series looks exactly like a corpus that shrank --
+        # which is what happened the first time this was run with --limit.
+        typer.echo(run.line())
+        typer.echo(
+            f"refusing to publish: this run covered {len(refs)} artifact(s), not the whole "
+            f"registry. {paths['root']} still holds the full index. Pass --force to overwrite it.",
+            err=True,
+        )
+        raise typer.Exit(2)
+    for path, payload in outputs.items():
         _write_to(store, dest, path, payload)
 
     typer.echo(run.line())

@@ -17,8 +17,12 @@ on:
         type: boolean
         default: false
       limit:
-        description: Clean only the first N artifacts. Empty means the whole corpus.
+        description: Clean only the first N artifacts. A partial run will not publish.
         default: ""
+      force:
+        description: Publish even when limit makes this a partial run.
+        type: boolean
+        default: false
       concurrency:
         description: Simultaneous downloads while snapshotting the bar tier.
         default: "4"
@@ -102,7 +106,7 @@ jobs:
             --config clean_v1 \
             --concurrency '${{ inputs.concurrency }}' \
             ${{ inputs.incremental && '--incremental' || '--full' }} \
-            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
+            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}             ${{ inputs.force && '--force' || '' }}
 
       - name: Build the total-return tier
         if: inputs.derive_tr && inputs.probe == ''
