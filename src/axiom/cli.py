@@ -1140,6 +1140,32 @@ def clean_run(
         raise typer.Exit(1)
 
 
+def _retry(call, *, what: str, attempts: int = 8, base_delay: float = 30.0):
+    """Run ``call`` until it stops raising, backing off between tries.
+
+    For work that makes progress even when it fails. A resumable download is exactly that: the
+    attempt that hits a rate limit still leaves everything it fetched in the cache, so the next
+    one has less to do. Retrying something that is *not* resumable this way would just be a
+    slower way to fail eight times.
+    """
+    import time
+
+    for attempt in range(1, attempts + 1):
+        try:
+            return call()
+        except Exception as exc:
+            if attempt == attempts:
+                raise
+            delay = base_delay * attempt
+            typer.echo(
+                f"{what} attempt {attempt}/{attempts} failed ({type(exc).__name__}: {exc}); "
+                f"retrying in {delay:.0f}s -- what it already fetched is kept",
+                err=True,
+            )
+            time.sleep(delay)
+    raise AssertionError("unreachable")
+
+
 def _bar_reader(store, dest: Path | None, refs, *, snapshot: bool, concurrency: int):
     """How the clean run gets each artifact's bytes, and how many workers to use doing it.
 
@@ -1166,14 +1192,22 @@ def _bar_reader(store, dest: Path | None, refs, *, snapshot: bool, concurrency: 
 
         settings = AxiomSettings()
         typer.echo(f"snapshotting {len(refs)} artifact(s) from {settings.raw_repo_id}...")
-        root = Path(
-            snapshot_download(
-                repo_id=settings.raw_repo_id,
-                repo_type="dataset",
-                allow_patterns=["raw/**/*.parquet"],
-                token=settings.hf_token.get_secret_value() if settings.hf_token else None,
-                max_workers=concurrency,
-            )
+        # The Hub rate-limits a burst of thirteen thousand requests however few workers make
+        # them, and `huggingface_hub`'s own per-request retry gives up after five tries. But
+        # `snapshot_download` is **resumable**: what it already fetched stays in the cache and a
+        # second call skips it. So the retry that matters is around the whole snapshot, not
+        # around each file, and each attempt starts further along than the last.
+        root = _retry(
+            lambda: Path(
+                snapshot_download(
+                    repo_id=settings.raw_repo_id,
+                    repo_type="dataset",
+                    allow_patterns=["raw/**/*.parquet"],
+                    token=settings.hf_token.get_secret_value() if settings.hf_token else None,
+                    max_workers=concurrency,
+                )
+            ),
+            what="snapshot",
         )
         concurrency = min(32, (os.cpu_count() or 4) * 2)
         typer.echo(f"snapshot at {root}; cleaning with {concurrency} worker(s)")
