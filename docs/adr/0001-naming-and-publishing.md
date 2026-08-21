@@ -1,6 +1,8 @@
 # ADR-0001: Naming and publishing
 
-**Status:** Accepted (v0.0)
+**Status:** Accepted (v0.0). The GitHub half is **superseded by ADR-0017** (v0.2): the source
+repo is public as of 2026-08-21. Everything this ADR says about PyPI and about data and model
+artifacts still stands.
 
 ## Context
 

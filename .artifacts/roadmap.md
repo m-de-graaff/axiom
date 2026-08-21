@@ -1,6 +1,6 @@
 # Axiom — Model Line Roadmap: v0.0 → v1.0
 
-**Status:** private, unpublished. Working title `axiom` (import name `axiom`; distribution name deferred — see Publish Gate).
+**Status:** source public since 2026-08-21 (ADR-0017); data and model artifacts unpublished. Working title `axiom` (import name `axiom`; distribution name deferred — see Publish Gate).
 **Owner:** Mark (`m-de-graaff`), solo, building with Claude Code.
 **Scope of this roadmap:** V1 = the trained K-line foundation model delivered as `.safetensors`, plus everything required to produce it (data acquisition, cleaning, preprocessing contract, tokenizer, pre-tokenized corpus, AR decoder training, evaluation harness, export, local ROCm inference). Chart predictor, backtester, and the trading agent are **post-1.0 product lines** and intentionally absent here.
 **Source of truth for requirements:** "Axiom V1: Component Inventory and Build Requirements on the Free-First Stack (2026)" (components C1–C11).
@@ -15,7 +15,7 @@
 | Home PC (RX 7900 XTX, ROCm, Linux) | Inference only. Receives exactly one thing: the final `.safetensors` + config. |
 | Compute | Free-first: Kaggle (~30 GPU-h/wk, P100 or 2×T4, 12 h sessions; TPU v5e-8 ~20 h/wk, 9 h sessions), Modal ($30/mo credits, resets monthly), optional TRC (stretch). Paid fallback only by explicit decision: Vast.ai/RunPod RTX 4090 ≈ $0.30–0.34/h. |
 | Storage | HF Hub free tier: 100 GB private. Optional Cloudflare R2 (10 GB, zero egress) as hot shard cache. |
-| Publishing | **Nothing public until the Publish Gate (post-v1.0).** No PyPI, no public GitHub, no public HF repos. Private repos under `m-de-graaff` are permitted infrastructure and are documented in §3. |
+| Publishing | **No PyPI and no public data or model artifacts until the Publish Gate (post-v1.0).** The source repo `m-de-graaff/axiom` went **public on 2026-08-21** to get unlimited Actions minutes (ADR-0017); the code was always publishable under `DATA_LICENSING.md`. `axiom-raw` stays private permanently. `axiom-tokenized` and `axiom-model` stay private until the gate. |
 | Architecture (locked by ADR in v0.0) | Two-stage discretize-then-autoregress. Stage 1: BSQ tokenizer (vendored from Kronos, MIT) as hierarchy default; flat FSQ (`vector-quantize-pytorch`) as ablation. Stage 2: decoder-only AR, Kronos-small config (8L/512d/1024ff/8h, ~24.7 M params), ctx 512, coarse/fine dual head with sampled-coarse, + asset-class & frequency conditioning embeddings. GPU-only for v1.0; TPU/JAX is stretch. |
 | Corpus (locked by ADR in v0.0) | **M0 (mandatory):** mixed-market 1h + 1d — Binance crypto spot + USDT-M futures, Dukascopy FX/commodities, Stooq/yfinance daily equities (~50 M clean bars). **M1 (stretch, decided at Gate G3):** + crypto 15m (+~50 M) and 5m (+~150 M) toward ~0.25–0.3 B bars. |
 | Honesty banner | Expected OOS: directional accuracy 50–53 %, RankIC 0.00–0.04. Volatility is the genuinely forecastable target and the centerpiece of evaluation. The durable value is the reproducible tokenizer + quantizer comparison + honest eval harness. This banner goes verbatim into the model card. |
@@ -46,11 +46,11 @@ Total: ~13–17 focused weeks ≈ 3–4 calendar months, consistent with the res
 
 ## 3. Repo & account topology (the documentation you asked for)
 
-Everything below lives under the personal account `m-de-graaff`. **All repos are private.** Nothing becomes public before the Publish Gate. Each version's TODO must update `docs/REPOS.md` in the monorepo when a repo is created.
+Everything below lives under the personal account `m-de-graaff`. **The source repo is public; every data and model repo is private.** No data or model artifact becomes public before the Publish Gate. Each version's TODO must update `docs/REPOS.md` in the monorepo when a repo is created.
 
 | Service | Repo | Visibility | Created in | Purpose |
 |---|---|---|---|---|
-| GitHub | `m-de-graaff/axiom` | Private | v0.0 | The monorepo. Cloud jobs `pip install` it via a read-only fine-grained PAT. (Alternative if you want zero GitHub: build a wheel and attach it as a private Kaggle Dataset — documented in the v0.0 TODO as fallback.) |
+| GitHub | `m-de-graaff/axiom` | **Public** (2026-08-21) | v0.0 | The monorepo. Cloud jobs `pip install` it via a read-only fine-grained PAT. (Alternative if you want zero GitHub: build a wheel and attach it as a private Kaggle Dataset — documented in the v0.0 TODO as fallback.) |
 | HF (dataset) | `m-de-graaff/axiom-runs` | Private | v0.0 | Training checkpoints, run manifests, resume pointers (`latest.json`). |
 | HF (space, optional) | `m-de-graaff/axiom-trackio` | Private | v0.0 | trackio experiment dashboard sync (trackio may auto-create its own backing dataset — accept and document). |
 | HF (dataset) | `m-de-graaff/axiom-raw` | Private | v0.1 | Raw-cache tier: cleaned-source Parquet (zstd) + provenance manifests. Loader+manifest only; never redistributed. |

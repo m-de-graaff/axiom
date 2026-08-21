@@ -29,7 +29,7 @@ kernel id in `remote/kaggle/loop_test/kernel-metadata.json` uses `markdgraaff`.
 
 | Repo | Visibility | Created in | Status | Purpose |
 |---|---|---|---|---|
-| `axiom` | Private | v0.0 | **Live** (2026-08-20) | The monorepo. Cloud jobs `pip install` it over a read-only fine-grained PAT. |
+| `axiom` | **Public** (2026-08-21, ADR-0017) | v0.0 | **Live** | The monorepo. Cloud jobs `pip install` it over a read-only fine-grained PAT — still used, though a public repo no longer needs one. |
 
 Default branch `main`, trunk-based, no branch protection (solo repo). CI runs on every push and
 pull request to `main`; first run was green across lint, types, and Python 3.11/3.12/3.13.

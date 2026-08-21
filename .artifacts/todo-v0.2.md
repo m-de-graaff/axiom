@@ -163,6 +163,8 @@ Phase G.
   - [ ] All new loaders fully tested offline; CI green; no live network in CI.
   - [ ] Storage < 10 GB total (headroom check vs the 100 GB tier passes trivially).
   - [ ] Zero market-data bytes resident on laptop or home PC (transient exception, if used, documented and cleaned); zero Kaggle GPU-hours; Modal spend < $8.
-  - [ ] Nothing public anywhere; `DATA_LICENSING.md` current.
+  - [x] No data or model artifact is public; `DATA_LICENSING.md` current. The source repo is
+        public as of 2026-08-21 (ADR-0017) — a deliberate change to the v0.0 constraint, not
+        a leak. `axiom-raw` is private and stays private.
 
 **Then:** v0.3 "Clean" TODO (next session) — Kronos Algorithm 1 (`PartitionByPriceJumps`, illiquid/stagnant runs) with Table 4 thresholds wired per frequency, the split/dividend policy *applied* (tokenization series vs total-return eval series, powered by this version's adjustment audit), survivorship documentation, and the synthetic edge-case test suite (splits, gaps, flash crashes, limit-up/down, DST, holidays, rollover).
