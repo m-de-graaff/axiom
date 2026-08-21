@@ -1136,6 +1136,76 @@ def clean_run(
         raise typer.Exit(1)
 
 
+@clean_app.command("probe")
+def clean_probe(
+    symbols: Annotated[str, typer.Argument(help="Comma-separated symbols to probe.")],
+    frequency: Annotated[str, typer.Option("--frequency")] = "1h",
+    source: Annotated[str, typer.Option("--source")] = "dukascopy",
+    config: Annotated[str, typer.Option("--config")] = "clean_v1",
+    dest: Annotated[Path | None, typer.Option("--dest")] = None,
+) -> None:
+    """Explain why a series fragmented: gap sizes, when the holes are, where the dead bars are.
+
+    The drop statistics say a series lost every bar. They cannot say whether that is a session
+    declared wrong, an instrument that stopped trading, or a rule doing its job. A gap
+    distribution that is almost entirely one slot wide, concentrated in a single UTC hour, is a
+    daily maintenance break the session rule has never been told about.
+    """
+    import pyarrow.parquet as pq
+
+    from axiom.clean.config import load_clean_config
+    from axiom.clean.probe import format_probe, probe_series
+    from axiom.clean.run import session_id_for
+    from axiom.registry import REGISTRY_PATH, read_registry
+
+    setup_logging()
+    cfg = load_clean_config(config)
+    store = _raw_store(dest)
+    registry_bytes = _read_from(store, dest, REGISTRY_PATH)
+    if registry_bytes is None:
+        typer.echo("no registry; run `axiom registry build` first", err=True)
+        raise typer.Exit(2)
+
+    from axiom.clean.run import ArtifactRef
+
+    wanted = set(_csv(symbols))
+    rows = [
+        r
+        for r in read_registry(registry_bytes).to_pylist()
+        if r["source"] == source and r["frequency"] == frequency and r["symbol"] in wanted
+    ]
+    if not rows:
+        typer.echo(f"no {source} {frequency} artifacts matching {sorted(wanted)}", err=True)
+        raise typer.Exit(2)
+
+    for row in sorted(rows, key=lambda r: r["symbol"]):
+        data = store.get(row["artifact_path"])
+        if data is None:
+            typer.echo(f"{row['artifact_path']}: unreadable", err=True)
+            continue
+        table = pq.read_table(io.BytesIO(data))
+        ref = ArtifactRef(
+            **{
+                k: row[k]
+                for k in (
+                    "artifact_path",
+                    "source",
+                    "market",
+                    "asset_class",
+                    "symbol",
+                    "frequency",
+                    "artifact_sha256",
+                )
+            }
+        )
+        session_id = session_id_for(table, ref)
+        result = probe_series(
+            table, frequency=frequency, session=cfg.session_for(session_id), top=10
+        )
+        typer.echo(format_probe(f"{row['artifact_path']}  session={session_id}", result))
+        typer.echo("")
+
+
 @clean_app.command("report")
 def clean_report(
     config: Annotated[str, typer.Option("--config")] = "clean_v1",

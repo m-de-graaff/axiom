@@ -26,6 +26,15 @@ on:
         description: Also build the derived total-return tier (ADR-0019).
         type: boolean
         default: false
+      probe:
+        description: Skip the clean run; explain why these symbols fragmented instead.
+        default: ""
+      probe_source:
+        description: Source for the probe.
+        default: dukascopy
+      probe_frequency:
+        description: Frequency for the probe.
+        default: "1h"
 
 permissions:
   contents: read
@@ -49,7 +58,19 @@ jobs:
       # every equity series would fail rather than quietly clean against the wrong calendar.
       - run: uv sync --frozen --extra calendars
 
+      - name: Explain why a series fragmented
+        if: inputs.probe != ''
+        env:
+          AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
+          AXIOM_DISABLE_TRACKING: "1"
+          HF_HUB_DISABLE_XET: "1"
+        run: >-
+          uv run axiom clean probe '${{ inputs.probe }}'
+          --source '${{ inputs.probe_source }}'
+          --frequency '${{ inputs.probe_frequency }}'
+
       - name: Clean the corpus
+        if: inputs.probe == ''
         env:
           AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
           AXIOM_GIT_COMMIT: ${{ github.sha }}
@@ -67,24 +88,25 @@ jobs:
             ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
 
       - name: Build the total-return tier
-        if: inputs.derive_tr
+        if: inputs.derive_tr && inputs.probe == ''
         env:
           AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
           AXIOM_GIT_COMMIT: ${{ github.sha }}
           AXIOM_DISABLE_TRACKING: "1"
+          HF_HUB_DISABLE_XET: "1"
         run: uv run axiom derive tr
 
       # The report belongs in git, so it is uploaded and a human commits what they have read.
       # A job that writes to its own repo can be right a hundred times and wrong once.
       - name: Render the drop-stats report
-        if: always()
+        if: inputs.probe == ''
         env:
           AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
           AXIOM_DISABLE_TRACKING: "1"
         run: uv run axiom clean report --out docs/reports/v0.3-clean-qa.md
 
       - name: Upload the report
-        if: always()
+        if: inputs.probe == ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: v0.3-clean-qa
