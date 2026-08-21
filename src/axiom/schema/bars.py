@@ -37,12 +37,19 @@ OHLCVA = ("open", "high", "low", "close", "volume", "amount")
 #: - ``XNYS-regular``  US equities, regular hours, one bar per exchange calendar date
 SESSIONS = frozenset({"24x7", "24x5", "XNYS-regular"})
 
-#: The span no intraday 24x5 bar may fall in.
+#: The span in which a 24x5 market is normally shut.
 #:
-#: Dukascopy's week boundary follows its server clock, which observes European DST: the week
-#: opens 22:00 UTC Sunday in winter and 21:00 UTC in summer, and closes at the matching hour on
-#: Friday. A sharp edge would fail twice a year on real data, so the assertion is the span that
-#: is closed under both regimes -- all of Saturday, and Sunday until 20:00 UTC (ADR-0015).
+#: Dukascopy's week boundary follows its server clock, which observes European DST: in modern
+#: data the week opens 22:00 UTC Sunday in winter and 21:00 UTC in summer. All of Saturday and
+#: Sunday before 20:00 UTC is outside that in both regimes.
+#:
+#: A bar in here is **counted, not rejected**. Measuring the feed across its whole history found
+#: two reasons a real bar lands in the window, and neither is a corrupt timestamp: the week
+#: opened at 19:00 UTC in 2003, earlier than it does now, and some eras pad the weekend with
+#: synthetic flat zero-volume bars carrying the Friday close forward. Rejecting those would throw
+#: away a whole instrument's history over a vendor convention, and would be the undocumented
+#: cleaning pass ADR-0010 exists to forbid. v0.3 drops the padding; the raw tier records it and
+#: says how much there is (ADR-0015).
 WEEKEND_CLOSE_UNTIL_HOUR_UTC = 20
 
 #: A ts above this is not a plausible millisecond timestamp (it would be year 5138), so it is
@@ -169,8 +176,10 @@ def validate_bars(
 
     ``session_id`` adds the two checks that only make sense once a market can be shut:
 
-    - **24x5 intraday** -- a bar inside the weekend close is a violation. Nothing traded then, so
-      a bar there means the timestamps are wrong, not that the market was busy.
+    - **24x5 intraday** -- bars inside the weekend close are *counted*, as a warning. They are
+      real bars the vendor published: an earlier historical reopen, or synthetic flat padding
+      carrying the Friday close across the weekend. Which of the two is a question for v0.3, and
+      failing the series here would answer it by deleting the instrument.
     - **XNYS-regular daily** -- bars must sit exactly on 00:00 UTC. For crypto that alignment is a
       warning, because Binance really does publish phase-shifted bars after a restart; for a
       vendor's daily equity dump it is a parse guarantee, and a violation of it means the date
@@ -217,7 +226,12 @@ def validate_bars(
     off_grid = ts % step != 0
     strict_grid = session_id == "XNYS-regular" and step >= 86_400_000
     _record(report, "ts_off_grid", off_grid, warning=not strict_grid)
-    _record(report, "bars_in_weekend_close", closed_window_bars(ts, session_id, frequency))
+    _record(
+        report,
+        "bars_in_weekend_close",
+        closed_window_bars(ts, session_id, frequency),
+        warning=True,
+    )
 
     open_, high, low, close = (columns[k] for k in ("open", "high", "low", "close"))
     _record(report, "high_below_open_or_close", high < np.maximum(open_, close))
@@ -258,6 +272,12 @@ def count_off_grid(ts: np.ndarray | pa.ChunkedArray, frequency: str) -> int:
     step = grid_step_ms(frequency)
     values = np.asarray(ts if isinstance(ts, np.ndarray) else ts.to_numpy(zero_copy_only=False))
     return int(np.count_nonzero(values % step))
+
+
+def count_closed_window(ts: np.ndarray | pa.ChunkedArray, session_id: str, frequency: str) -> int:
+    """Bars falling when the market was normally shut. Recorded, never repaired."""
+    values = np.asarray(ts if isinstance(ts, np.ndarray) else ts.to_numpy(zero_copy_only=False))
+    return int(np.count_nonzero(closed_window_bars(values, session_id, frequency)))
 
 
 def count_gaps(ts: np.ndarray | pa.ChunkedArray, frequency: str) -> int:

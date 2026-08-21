@@ -63,11 +63,36 @@ whether to feed it to anything.
 FX runs one continuous session from Sunday evening to Friday evening: `session_id = "24x5"`,
 `exchange_tz = "UTC"`.
 
-The session boundary follows Dukascopy's server clock, which observes European DST — the week
-opens at 22:00 UTC on Sunday in winter and 21:00 UTC in summer, and closes at the matching hour on
-Friday. So the loader's weekend assertion is not a sharp edge but a window that is safe in both
-regimes: **no bar may fall between Saturday 00:00 UTC and Sunday 20:00 UTC.** A tighter rule would
-fail twice a year on real data; a looser one would not catch anything.
+The session boundary follows Dukascopy's server clock, which observes European DST — in modern
+data the week opens at 22:00 UTC on Sunday in winter and 21:00 UTC in summer, and closes at the
+matching hour on Friday. All of Saturday and Sunday before 20:00 UTC is outside that under both
+regimes.
+
+**Bars in that window are counted, not rejected**, and the first version of this loader had it the
+other way. Asserting the window failed 24 of 27 hourly series on their first real pull, thousands
+of rows each. Measuring the feed across its own history showed why, and neither reason is a
+corrupt timestamp:
+
+| Sample | Saturday bars | Sunday bars |
+|---|---|---|
+| May 2003 | none | from **19:00** UTC — the week opened earlier than it does now |
+| May 2005 | none | from 20:00 UTC |
+| May 2008, 2016, 2020, 2024 | none | from 21:00–22:00 UTC |
+| **May 2012** | **all 24 hours** | **all 24 hours** |
+
+The 2012 sample is the interesting one. Of its 96 weekend hours, **88 carry OHLC all equal to the
+Friday close with volume exactly 0.0** — the vendor padding the weekend with flat synthetic bars.
+The remaining 8 are the genuine Sunday reopen, with real volume.
+
+So the feed's weekend convention is not stable across 23 years, and a rule tuned on recent data
+rejects the older history. Rejecting an instrument's entire 155 000-bar series because 8 000 of
+them are vendor padding would also be exactly the undocumented cleaning pass ADR-0010 exists to
+forbid: the raw tier would arrive pre-cleaned, and v0.3's drop statistics would be measured
+against a baseline nobody recorded.
+
+The manifest therefore carries `closed_window_count`, so the QA report can state how much of the
+FX tier is padding without re-reading four million bars, and v0.3's consecutive-stagnant-run
+filter — Kronos Algorithm 1, which exists precisely for flat runs — is what removes it.
 
 Daily bars inherit the same boundary. The 1d series carries a bar stamped on **Sunday** — the
 two-to-three-hour tail of the week's opening evening, with a volume an order of magnitude below a

@@ -57,6 +57,7 @@ VOLATILE_MANIFEST_FIELDS: frozenset[str] = frozenset(
 V02_DEFAULTED_FIELDS: dict[str, Any] = {
     "price_side": "trade",
     "redistribution_class": "loader_manifest_private_cache",
+    "closed_window_count": 0,
 }
 
 
@@ -92,6 +93,10 @@ class FileManifest(BaseModel):
     #: Bars whose open time is not on the frequency grid. Real bars from an exchange restart,
     #: counted rather than repaired (ADR-0010).
     off_grid_count: int = 0
+    #: Bars falling when a session-bound market was normally shut. Zero for 24x7 sources. For
+    #: Dukascopy this is mostly the vendor's flat zero-volume weekend padding, and it is recorded
+    #: here so v0.3 can size the problem without re-reading four million bars (ADR-0015).
+    closed_window_count: int = 0
 
     # How to read the numbers. `volume` is base asset and `amount` is quote asset for Binance,
     # natively; a source without a native quote volume gets `amount` synthesized and says so.

@@ -57,6 +57,7 @@ from axiom.raw.store import RawStore
 from axiom.schema.bars import (
     ROW_GROUP_SIZE,
     bars_metadata,
+    count_closed_window,
     count_gaps,
     count_off_grid,
     validate_bars,
@@ -291,6 +292,7 @@ def pull_item(
             last_ts=int(ts[-1]),
             gap_count=count_gaps(ts, item.frequency),
             off_grid_count=count_off_grid(ts, item.frequency),
+            closed_window_count=count_closed_window(ts, item.session_id, item.frequency),
             source_symbol=item.vendor_symbol,
             universe_hash=universe_hash,
             **source.manifest_extras(item),

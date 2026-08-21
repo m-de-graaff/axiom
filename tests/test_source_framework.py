@@ -103,11 +103,29 @@ def test_weekday_utc_puts_monday_at_zero():
     assert weekday_utc(np.array([MONDAY + 5 * DAY_MS])).tolist() == [5]  # Saturday
 
 
-def test_a_weekend_bar_fails_a_24x5_intraday_series():
+def test_a_weekend_bar_is_counted_not_rejected():
+    """Measured against the real feed: bars land in the weekend window for two honest reasons.
+
+    Dukascopy's week opened at 19:00 UTC in 2003, earlier than it does now, and some eras pad the
+    weekend with flat zero-volume bars carrying the Friday close forward. An earlier version of
+    this test asserted a violation, and that rule failed 24 of 27 hourly FX series on their first
+    real pull -- throwing away 155 000 good bars per instrument over a vendor convention, which
+    is the undocumented cleaning pass ADR-0010 forbids.
+    """
     saturday_noon = MONDAY + 5 * DAY_MS + 12 * HOUR_MS
     report = validate_bars(bars([MONDAY, saturday_noon]), "1h", session_id="24x5")
-    assert "bars_in_weekend_close" in report.violations
-    assert not report.ok
+    assert "bars_in_weekend_close" in report.warnings
+    assert report.ok, "the series still lands; v0.3 decides what to do with the padding"
+
+
+def test_the_closed_window_count_sizes_the_padding():
+    """So the QA report can say how much of the FX tier is padding without re-reading it."""
+    from axiom.schema.bars import count_closed_window
+
+    saturday = MONDAY + 5 * DAY_MS
+    ts = np.array([MONDAY, saturday, saturday + HOUR_MS, saturday + 2 * HOUR_MS])
+    assert count_closed_window(ts, "24x5", "1h") == 3
+    assert count_closed_window(ts, "24x7", "1h") == 0
 
 
 def test_the_sunday_reopen_is_allowed():

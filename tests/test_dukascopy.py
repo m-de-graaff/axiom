@@ -286,19 +286,26 @@ def test_a_stale_artifact_refetches_every_year_it_is_missing(tmp_path):
     assert [year for _, _, year in fetcher.calls] == [2021, 2022, 2023, 2024]
 
 
-def test_a_weekend_bar_fails_the_item_instead_of_landing(tmp_path):
-    """Nothing trades on a Saturday, so a bar there means the timestamps are wrong."""
+def test_weekend_padding_lands_and_is_counted(tmp_path):
+    """The feed pads weekends with flat zero-volume bars in some eras, and that is a fact.
 
-    def saturday_fetcher(source_symbol, frequency, start, end):
-        # 2021-01-02 was a Saturday.
-        saturday_noon = int(datetime(2021, 1, 2, 12, tzinfo=UTC).timestamp() * 1000)
-        return bars_at([saturday_noon, saturday_noon + HOUR_MS])
+    Measured on EUR/USD in May 2012: 88 of 96 weekend hours carry OHLC all equal to the Friday
+    close with volume exactly 0. Refusing them would delete the instrument's whole history, so
+    they are recorded and counted, and v0.3's stagnant-run filter is what removes them.
+    """
 
-    src = DukascopySource(universe("2021-01-01"), as_of=date(2021, 6, 1), fetcher=saturday_fetcher)
+    def padding_fetcher(source_symbol, frequency, start, end):
+        # 2021-01-02 was a Saturday. A flat run across it, then a real Monday bar.
+        saturday = int(datetime(2021, 1, 2, 12, tzinfo=UTC).timestamp() * 1000)
+        monday = int(datetime(2021, 1, 4, 9, tzinfo=UTC).timestamp() * 1000)
+        return bars_at([saturday, saturday + HOUR_MS, monday])
+
+    src = DukascopySource(universe("2021-01-01"), as_of=date(2021, 6, 1), fetcher=padding_fetcher)
     result = pull(src, LocalRawStore(tmp_path), src.work_items(["1h"])[0])
 
-    assert result.status == "failed"
-    assert "bars_in_weekend_close" in result.error
+    assert result.status == "ok", result.error
+    assert result.manifest is not None
+    assert result.manifest.closed_window_count == 2
 
 
 def test_the_run_walks_both_frequencies_and_both_instruments(tmp_path):
