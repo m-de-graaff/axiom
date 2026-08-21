@@ -1058,6 +1058,9 @@ def clean_run(
     limit: Annotated[
         int | None, typer.Option("--limit", help="Clean only the first N artifacts. Smoke runs.")
     ] = None,
+    concurrency: Annotated[
+        int, typer.Option("--concurrency", help="Simultaneous artifact downloads.")
+    ] = 16,
 ) -> None:
     """Clean every bar artifact in the registry into one segment index.
 
@@ -1113,6 +1116,7 @@ def clean_run(
             existing_dropstats=existing_drops,
             incremental=incremental,
             registry_hash=registry_metadata(registry).get("axiom_registry_hash", ""),
+            concurrency=1 if dest is not None else concurrency,
         )
     except ConfigHashChanged as exc:
         typer.echo(str(exc), err=True)

@@ -268,6 +268,7 @@ def clean_corpus(
     existing_dropstats: pa.Table | None = None,
     incremental: bool = False,
     registry_hash: str = "",
+    concurrency: int = 1,
     now: Any = None,
 ) -> CleanRun:
     """Clean every artifact in ``refs`` and reduce the results into one run.
@@ -275,6 +276,12 @@ def clean_corpus(
     ``read`` maps an :class:`ArtifactRef` to its bytes; injecting it is what lets this run against
     the Hub, a local directory, or a Modal volume without knowing which. ``now`` is a clock,
     injected so a test can assert on the manifest without the wall time in it.
+
+    ``concurrency`` threads the read-and-clean loop. Fourteen thousand artifacts against the Hub
+    is fourteen thousand HTTPS round trips where the cost is latency, the same shape the registry
+    build has; numpy drops the GIL for the vectorized part. Results are consumed in input order,
+    so the output does not depend on which worker finished first -- and the tables are sorted on
+    the way out regardless.
 
     An incremental run carries forward both the segments *and* the drop stats of the artifacts it
     skipped. Carrying only the segments would leave the dropstats table describing whichever
@@ -305,18 +312,31 @@ def clean_corpus(
         run.reused_artifacts = len(fresh)
         log.info("incremental: %d stale, %d reused", len(todo), len(fresh))
 
-    start = now() if now else _monotonic()
-    for ref in todo:
+    def clean_one(ref: ArtifactRef):
+        """Returns the result, or the exception, so one bad file cannot end the run."""
         try:
             data = read(ref)
             if data is None:
                 raise FileNotFoundError(ref.artifact_path)
-            result = clean_artifact(data, ref, config)
+            return ref, clean_artifact(data, ref, config), None
         except Exception as exc:
-            log.warning("clean failed for %s: %s", ref.artifact_path, exc)
+            return ref, None, exc
+
+    start = now() if now else _monotonic()
+    if concurrency > 1 and len(todo) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="clean") as pool:
+            outcomes = list(pool.map(clean_one, todo))
+    else:
+        outcomes = [clean_one(ref) for ref in todo]
+
+    for ref, result, error in outcomes:
+        if error is not None:
+            log.warning("clean failed for %s: %s", ref.artifact_path, error)
             run.failed += 1
             run.failures.append(
-                {"artifact_path": ref.artifact_path, "error": f"{type(exc).__name__}: {exc}"}
+                {"artifact_path": ref.artifact_path, "error": f"{type(error).__name__}: {error}"}
             )
             continue
         run.ok += 1

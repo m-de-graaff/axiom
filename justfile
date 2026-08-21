@@ -206,19 +206,33 @@ raw-crosscheck symbols="BTCUSDT,ETHUSDT,SOLUSDT":
 
 # --- the v0.3 cleaning pass ---
 
-# Clean the whole corpus on Modal: registry fan-out -> clean/v1/ in axiom-raw.
-clean-corpus *ARGS:
-    uv run modal run remote/modal/clean_run.py {{ARGS}}
+# Clean the whole corpus on a GitHub runner: registry fan-out -> clean/v1/ in axiom-raw.
+pull-clean *ARGS:
+    gh workflow run clean.yml {{ARGS}}
 
-# Smoke run: fifty artifacts, same code path.
+# Smoke run: fifty artifacts, same code path, nothing else different.
 clean-smoke:
-    uv run modal run remote/modal/clean_run.py --limit 50
+    gh workflow run clean.yml -f limit=50
+
+clean-watch:
+    gh run watch $(gh run list --workflow=clean.yml --limit 1 --json databaseId -q '.[0].databaseId') --exit-status
+
+clean-log:
+    gh run view $(gh run list --workflow=clean.yml --limit 1 --json databaseId -q '.[0].databaseId') --log
+
+# Fetch the drop-stats report the clean workflow produced.
+clean-report-fetch:
+    gh run download $(gh run list --workflow=clean.yml --limit 1 --json databaseId -q '.[0].databaseId') -n v0.3-clean-qa -D docs/reports
+
+# Backend #2 for the same job. Blocked on the Modal account gate; see ADR-0009.
+clean-modal *ARGS:
+    uv run modal run remote/modal/clean_run.py {{ARGS}}
 
 # Clean a local raw tier instead, for development.
 clean-local dest=".artifacts/raw-local":
     uv run axiom clean run --dest {{dest}}
 
-# Render the drop-stats report and drop it in docs/reports/.
+# Render the drop-stats report from the tier in axiom-raw.
 clean-report:
     uv run axiom clean report --out docs/reports/v0.3-clean-qa.md
 
