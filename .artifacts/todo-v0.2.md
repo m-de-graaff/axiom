@@ -156,7 +156,11 @@ Phase G.
   - [ ] Registry built; canned queries answer what/from-where/pulled-when without touching raw files.
   - [ ] Coverage matrix shows all five M0 slices at their required frequencies, every artifact with a valid sidecar.
   - [ ] Total raw bars ≥ ~50 M, or a written shortfall analysis exists.
-  - [ ] Adjustment audit verdict recorded; Stooq manifests carry the evidence-based `adjustment_policy`.
+  - [x] Adjustment audit verdict recorded: `split_and_dividend_adjusted`, and the loader emits it.
+        **The 12,422 existing sidecars still say `vendor_adjusted_unverified`** — the field is in
+        the identity hash and the Parquet embeds that hash, so correcting them means re-pulling a
+        CAPTCHA-gated archive for one word. Deliberately deferred: Stooq refreshes daily, so the
+        next routine pull rewrites them for free. ADR-0016 carries the verdict and names the trap.
   - [ ] Dukascopy kill-drill + idempotent resume verified; immutable-prior-years rule holds byte-wise on a sample.
   - [ ] Stooq ingestion ran cloud-side; if the staging fallback fired, `staging_exception_used` is true in the pull manifest, local deletion is logged, and `staging/` is pruned.
   - [ ] `universe_equities_v1.yaml` + `universe_dukascopy_v1.yaml` committed with hashes.

@@ -156,6 +156,24 @@ Starting v0.3 from the assumption would have added dividends to a series that al
 them, and the error would have been invisible — a total-return series double-counting dividends
 still looks like a price series going up.
 
+### The tier's sidecars lag the verdict, deliberately
+
+**Read this ADR, not the `adjustment_policy` field, until the next Stooq pull.**
+
+The loader emits `split_and_dividend_adjusted` from 2026-08-21. The 12 422 sidecars already in
+`axiom-raw` still say `vendor_adjusted_unverified`, because the field is part of the identity hash
+and the Parquet embeds that hash — so a sidecar cannot be corrected in place, only rewritten from
+the bars, which means re-downloading the CAPTCHA-gated archive for a one-word change.
+
+It corrects itself. Stooq refreshes the dump daily, so the next routine pull sees a different
+archive `sha256`, re-pulls every series and writes the measured value with no special flag. The
+stale value is also the conservative one: it says nobody checked, which is false but harmless,
+rather than asserting an adjustment that was never measured.
+
+**The trap to avoid:** treating `vendor_adjusted_unverified` as "assume unadjusted" and applying a
+split correction. These series are already split *and* dividend adjusted. Applying either again
+is silent corruption — the prices stay plausible and every downstream number is wrong.
+
 ### Survivorship: accepted and documented
 
 Stooq's bulk dump skews heavily toward currently-listed tickers. Companies that went bankrupt or
