@@ -385,6 +385,31 @@ gh workflow run pull-stooq.yml -f from_staging=staging/stooq/d_us_txt.zip -f arc
 
 That sets `staging_exception_used` in the run manifest. Prune `staging/` once the parse succeeds.
 
+### The Hub rate-limits reads too, and not uniformly
+
+Commits are capped at 128 an hour (above). Reads have their own limit, and the two code paths
+behave differently when it bites — which is why one job survived it and another lost 90% of its
+input on the same afternoon.
+
+**Small files take the classic path.** `hf_hub_download` retries 429s internally, so the registry
+build logged 162 rate-limit warnings and still read all 13 580 sidecars: the count reconciled
+exactly and it reported zero unreadable.
+
+**Large files take Xet**, Hugging Face's content-addressed backend. Its errors arrive as
+`Previous task error: Network error: ... (429 Too Many Requests), domain:
+https://huggingface.co/api/datasets/.../xet-read-token/...` and are **not** retried for you. Any
+job that downloads Parquet in bulk — the equities universe ranking, the cross-check — has to
+retry them itself.
+
+Two rules follow, and the second is the one that matters:
+
+1. Keep read concurrency lower for Parquet than for sidecars. Eight is fine; sixteen provokes it.
+2. **Never let an unreadable file become a value.** The universe builder returned `0.0` for a
+   ticker it could not download, the "> 0" cut discarded it, and a 429 became "this stock has no
+   volume" — 978 of roughly 9 000 candidates measured, reported as "978 of 978 kept". It now
+   returns `None`, counts the unrankable separately, and refuses to emit a universe when more
+   than 1% could not be measured.
+
 ### The registry — after every pull
 
 ```sh
