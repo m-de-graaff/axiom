@@ -111,15 +111,17 @@ jobs:
 
       # The report belongs in git, so it is uploaded and a human commits what they have read.
       # A job that writes to its own repo can be right a hundred times and wrong once.
+      # `always()` because the report is how a failed run gets diagnosed. Rendering it only on
+      # success means the one time it matters is the one time it does not run.
       - name: Render the drop-stats report
-        if: inputs.probe == ''
+        if: always() && inputs.probe == ''
         env:
           AXIOM_HF_TOKEN: ${{ secrets.AXIOM_HF_TOKEN }}
           AXIOM_DISABLE_TRACKING: "1"
         run: uv run axiom clean report --out docs/reports/v0.3-clean-qa.md
 
       - name: Upload the report
-        if: inputs.probe == ''
+        if: always() && inputs.probe == ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: v0.3-clean-qa

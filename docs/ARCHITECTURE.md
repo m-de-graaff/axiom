@@ -80,6 +80,7 @@ driver is exempt and says so: it is handed bytes and contains none of the rules.
 | `axiom.clean.engine` | Spans to segment rows and drop-stat rows, with the invariants asserted |
 | `axiom.clean.run` | The corpus driver: artifact selection, staleness, config-hash refusal |
 | `axiom.clean.reports` | Usable bars, usable windows, drop rates, top-20, red flags |
+| `axiom.clean.probe` | Why a series fragmented: gap sizes, when the holes are, dead bars |
 | `axiom.adjust.policy` | `tr_close` — identity or dividend accumulation, per the recorded verdict |
 | `axiom.adjust.derive` | The derived total-return tier, or just its coverage manifest |
 | `axiom.testing.synth` | Series with known pathologies and ground truth about where cuts belong |

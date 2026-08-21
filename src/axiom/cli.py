@@ -1326,20 +1326,23 @@ def derive_tr_cmd(
     rows = read_registry(registry_bytes).to_pylist()
 
     if verdict is None:
-        policies = {
+        from axiom.adjust.policy import RECORDED_POLICY
+
+        verdict = RECORDED_POLICY["stooq"]
+        # The sidecars record what the loader believed at pull time, which for Stooq was
+        # `vendor_adjusted_unverified` because the audit had not run yet. Saying so out loud beats
+        # letting the two drift quietly apart (ADR-0019).
+        believed = {
             r["adjustment_policy"]
             for r in rows
             if r["source"] == "stooq" and r["frequency"] == "1d"
         }
-        if len(policies) != 1:
+        stale = believed - {verdict}
+        if stale:
             typer.echo(
-                f"the Stooq sidecars carry {len(policies)} adjustment policies "
-                f"({sorted(policies)}); re-run `axiom raw audit-adjustments` before deriving a "
-                "total-return series",
-                err=True,
+                f"note: the Stooq sidecars still record {sorted(stale)}; the measured verdict is "
+                f"{verdict} (docs/reports/v0.2-adjustment-audit.md) and that is what is used"
             )
-            raise typer.Exit(2)
-        verdict = policies.pop()
 
     run = derive_tr(store, rows, verdict=verdict, limit=limit)
     _write_to(store, dest, TR_MANIFEST_PATH, run.to_json().encode("utf-8"))

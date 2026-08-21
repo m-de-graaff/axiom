@@ -25,6 +25,29 @@ POLICY_UNADJUSTED = "unadjusted"
 POLICY_NONE = "none"
 POLICY_UNKNOWN = "vendor_adjusted_unverified"
 
+#: What each source's series were **measured** to be, per source (ADR-0019).
+#:
+#: Not read from the sidecars, and the reason is worth stating because it looks like a
+#: duplication. `adjustment_policy` in a manifest records what the loader believed when it wrote
+#: the file, and for Stooq that was honestly `vendor_adjusted_unverified` -- the audit had not run
+#: yet. The audit ran afterwards and established `split_and_dividend_adjusted`
+#: (`docs/reports/v0.2-adjustment-audit.md`).
+#:
+#: Correcting the sidecars is not the cheap fix it looks like: `adjustment_policy` is inside
+#: `manifest_sha256`, which is stamped into each Parquet's own metadata, so rewriting the field
+#: breaks the file-to-sidecar link for twelve thousand artifacts and is a re-pull rather than an
+#: edit. The two values are not in conflict -- one is a belief at pull time, the other a
+#: measurement after it -- so both are kept and this is the one that decides.
+#:
+#: `axiom derive tr` cross-checks the sidecars against this and says so when they differ, rather
+#: than letting the divergence go quiet.
+RECORDED_POLICY: dict[str, str] = {
+    "stooq": POLICY_SPLIT_AND_DIVIDEND,
+    "binance": POLICY_NONE,
+    "binance_vision": POLICY_NONE,
+    "dukascopy": POLICY_NONE,
+}
+
 #: Verdicts for which the vendor's close already *is* the total-return path.
 IDENTITY_VERDICTS = frozenset({POLICY_SPLIT_AND_DIVIDEND, POLICY_NONE})
 
