@@ -21,9 +21,22 @@ from axiom.provenance.manifest import SIDECAR_SUFFIX, FileManifest
 
 log = logging.getLogger("axiom.raw")
 
-#: Files per Hub commit. The Hub is happier with a few dozen files per commit than with one
-#: commit per file, and a batch that fails is a batch worth retrying whole.
-DEFAULT_BATCH = 50
+#: Files per Hub commit.
+#:
+#: The number that governs this is not throughput, it is **the Hub's limit of 128 commits per
+#: hour per repository**. v0.1's 600 series at 50 files a commit was 24 commits and nowhere near
+#: it. The v0.2 equities tier is 12 436 series -- 24 872 files -- which at the same batch size is
+#: roughly 500 commits, and the real pull died partway through with
+#: `429 ... You have exceeded the rate limit for repository commits (128 per hour)`.
+#:
+#: 2 000 files a commit puts a full equities pull at about 13 commits, which leaves room for the
+#: other sources and the registry to run in the same hour. Resume granularity is the cost: a
+#: killed run loses up to a batch, so this trades a thousand series against being able to finish
+#: at all.
+#:
+#: ponytail: batched `upload_folder`; switch to `upload_large_folder` if one source ever needs
+#: more files than a batch of this size can carry in a single commit (the roadmap names it)
+DEFAULT_BATCH = 2_000
 
 
 class RawStore(Protocol):

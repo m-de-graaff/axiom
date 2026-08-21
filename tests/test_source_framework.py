@@ -224,3 +224,60 @@ def test_a_non_default_price_side_changes_the_hash():
     bare = FileManifest.model_validate(V01_SIDECAR)
     bid = bare.model_copy(update={"price_side": "bid"})
     assert bid.manifest_sha256 != bare.manifest_sha256
+
+
+# --- the final commit -------------------------------------------------------------------------
+
+
+def test_a_failing_final_flush_does_not_lose_the_run_manifest():
+    """A pull that landed twelve thousand series and could not commit its last batch has still
+    landed twelve thousand series. The v0.2 Stooq run crashed here and lost its manifest."""
+    from axiom.provenance.manifest import PullRunManifest
+    from axiom.sources.base import run_pull
+
+    class FlushFails:
+        def read_sidecar(self, artifact_path):
+            return None
+
+        def get(self, artifact_path):
+            return None
+
+        def put(self, artifact_path, data, manifest):
+            return None
+
+        def list_manifests(self):
+            return []
+
+        def flush(self):
+            raise RuntimeError("429 Too Many Requests: 128 commits per hour")
+
+    class OneItemSource:
+        name = "test"
+
+        def artifact_path(self, item):
+            return f"raw/test/{item.symbol}.parquet"
+
+        def plan(self, item):
+            return SourcePlan(["u"], ["d" * 64])
+
+        def build(self, item, plan, load_existing):
+            return bars([MONDAY, MONDAY + DAY_MS])
+
+        def manifest_extras(self, item):
+            return {}
+
+    manifest = PullRunManifest(
+        pull_run_id="r",
+        started_at="2026-08-21T00:00:00+00:00",
+        loader_version="test",
+        backend_tag="test",
+        universe_hash="0123456789ab",
+        universe_path="n/a",
+        markets=["test"],
+        frequencies=["1d"],
+    )
+
+    run = run_pull(OneItemSource(), FlushFails(), [WorkItem("test", "AAA", "1d")], manifest)
+
+    assert run.manifest.ok == 1, "the item still landed"
+    assert "429" in run.manifest.flush_error, "and the run says its tail did not commit"

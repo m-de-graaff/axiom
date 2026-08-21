@@ -196,6 +196,11 @@ class PullRunManifest(BaseModel):
     #: The rule is only a rule if the exceptions are countable.
     staging_exception_used: bool = False
 
+    #: Set when the run's final commit failed. The artifacts committed before it are still there;
+    #: this says the tail of the run is not, so a reader knows the tier is short of what the
+    #: counts below claim rather than discovering it later.
+    flush_error: str = ""
+
     ok: int = 0
     skipped: int = 0
     failed: int = 0

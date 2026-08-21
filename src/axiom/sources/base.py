@@ -392,5 +392,14 @@ def run_pull(
             # anything gentler would test a kinder failure than the one that actually happens.
             log.warning("AXIOM_KILL_AFTER_ITEMS=%d reached; dying without flushing", kill_after)
             os._exit(137)
-    store.flush()
+
+    # The final commit is as fallible as every other one -- it is the same Hub call the loop has
+    # been making all along -- and letting it escape would throw away the run manifest that
+    # records what just happened. A pull that landed twelve thousand series and could not commit
+    # its last batch has still landed twelve thousand series.
+    try:
+        store.flush()
+    except Exception as exc:
+        log.error("final flush failed: %s: %s", type(exc).__name__, exc)
+        run.manifest.flush_error = f"{type(exc).__name__}: {exc}"
     return run
