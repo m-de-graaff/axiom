@@ -39,6 +39,37 @@ log = logging.getLogger("axiom.raw")
 DEFAULT_BATCH = 2_000
 
 
+def retry(call, *, what: str, attempts: int = 8, base_delay: float = 30.0):
+    """Run ``call`` until it stops raising, backing off between tries.
+
+    For work that makes progress even when it fails. A resumable download is exactly that: the
+    attempt that hits a rate limit still leaves everything it fetched in the cache, so the next
+    one has less to do. Retrying something that is *not* resumable this way would just be a
+    slower way to fail eight times.
+    """
+    import time
+
+    for attempt in range(1, attempts + 1):
+        try:
+            return call()
+        except Exception as exc:
+            if attempt == attempts:
+                raise
+            delay = base_delay * attempt
+            log.warning(
+                "%s attempt %d/%d failed (%s: %s); retrying in %.0fs -- what it already "
+                "fetched is kept",
+                what,
+                attempt,
+                attempts,
+                type(exc).__name__,
+                exc,
+                delay,
+            )
+            time.sleep(delay)
+    raise AssertionError("unreachable")
+
+
 class RawStore(Protocol):
     """Read a sidecar, write an artifact plus its sidecar, flush whatever is pending."""
 
@@ -168,24 +199,31 @@ class HubRawStore:
     def list_manifests(self) -> list[FileManifest]:
         """Every sidecar in the dataset.
 
-        A few hundred small JSON files, which is cheap enough to fetch whole and much simpler
-        than maintaining an index that could disagree with them. That index is the v0.2 corpus
-        registry, and it will be built over these files rather than instead of them.
-        """
-        from huggingface_hub import hf_hub_download
+        Fetched as one snapshot rather than file by file. v0.1 had a few hundred and a serial
+        loop was fine; v0.2 has 13,580, and 13,580 `hf_hub_download` calls is a HEAD plus a GET
+        each, which the Hub answers with 429 and no amount of patience gets past. Same lesson as
+        the bar tier, learned twice.
 
-        names = [
-            name
-            for name in self._api.list_repo_files(self.repo_id, repo_type="dataset")
-            if name.endswith(SIDECAR_SUFFIX)
-        ]
-        manifests = []
-        for name in sorted(names):
-            path = hf_hub_download(
-                repo_id=self.repo_id, filename=name, repo_type="dataset", token=self._token
+        The snapshot is resumable, so the retry wraps the whole thing: an attempt that is cut off
+        leaves what it fetched in the cache and the next one starts further along.
+        """
+        from huggingface_hub import snapshot_download
+
+        root = Path(
+            retry(
+                lambda: snapshot_download(
+                    repo_id=self.repo_id,
+                    repo_type="dataset",
+                    allow_patterns=[f"raw/**/*{SIDECAR_SUFFIX}"],
+                    token=self._token,
+                    max_workers=4,
+                ),
+                what="sidecar snapshot",
             )
-            manifests.append(FileManifest.from_json(Path(path).read_text(encoding="utf-8")))
-        return manifests
+        )
+        paths = sorted(root.rglob(f"*{SIDECAR_SUFFIX}"))
+        log.info("%d sidecar(s) in the snapshot", len(paths))
+        return [FileManifest.from_json(p.read_text(encoding="utf-8")) for p in paths]
 
     # --- writes -----------------------------------------------------------------------
 
