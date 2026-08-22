@@ -7,6 +7,7 @@ functions, and nothing routes around them.
 from __future__ import annotations
 
 import ast
+import json
 import math
 import types
 from pathlib import Path
@@ -298,3 +299,38 @@ def test_the_contract_stays_pure(path: Path) -> None:
 
     assert not imports & _FORBIDDEN
     assert imports <= _ALLOWED_ROOTS, f"{path.name} imports {sorted(imports - _ALLOWED_ROOTS)}"
+
+
+# --- the pinned regression snapshots -------------------------------------------------------
+
+SNAPSHOT_PATH = Path(__file__).resolve().parents[1] / "tests" / "snapshots" / "contract_v1.json"
+
+
+def test_a_snapshot_hash_exists_for_every_pinned_series_and_spec() -> None:
+    """The cheapest tripwire in the project: five series, two specs, ten hashes, no data.
+
+    Recomputing them needs the corpus, so this test checks the shape rather than the values. The
+    value half is the diff: any contract change that moves a number moves these hashes, and a
+    commit that changes them without a `schema_version` bump is a commit to argue with.
+    """
+    from axiom.contract.corpus import PINNED_SERIES
+
+    hashes = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+
+    expected = {f"{series}/{spec}" for series in PINNED_SERIES for spec in ("geo-v1", "ret-v1")}
+    assert set(hashes) == expected
+    assert all(
+        len(digest) == 64 and set(digest) <= set("0123456789abcdef") for digest in hashes.values()
+    )
+
+
+def test_the_snapshots_were_cut_against_the_committed_constants() -> None:
+    """A hash cut under different constants describes a contract nobody is running.
+
+    The dryrun that produced the snapshots loads the committed constants file, so the two move
+    together or not at all. This asserts they did.
+    """
+    hashes = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+
+    assert len(set(hashes.values())) == len(hashes)
+    assert load_constants().manifest.firewall_respected

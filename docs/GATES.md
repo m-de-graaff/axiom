@@ -3,6 +3,95 @@
 One section per gate, written when the gate is passed. Each claim names the evidence, so a number
 in the eventual model card can be traced back to the run that produced it.
 
+## G2 — v0.4 "Contract" — passed 2026-08-22
+
+**The gate:** roadmap §4/v0.4 — golden vectors + property tests green in CI; contract frozen at
+`schema_version = 1`; a causality audit that fails loudly if any future-window statistic sneaks in.
+**No tokenizer work may begin before G2.**
+
+### Checklist
+
+| Item | Status | Evidence |
+|---|---|---|
+| Golden vectors + full property battery green across the 3.11/3.12/3.13 matrix | Pass | 6 fixtures × 2 specs; 637 tests total, 155 of them contract tests |
+| Golden vectors verified by a second, independent implementation | Pass | `reference_features` in `tests/test_contract_golden.py` — plain Python from the ADR-0020 formulas, `statistics.median`, one bar at a time |
+| `@causality` marker wired | Pass | Registered in `pyproject.toml`; CI runs `pytest -m causality` as its own step so a marker that stops matching is a failure, not a silent pass |
+| Prefix-consistency and perturbation-invariance pass on synthetic data | Pass | `test_a_prefix_transforms_to_a_prefix_of_the_transform`, `test_perturbing_a_bar_leaves_every_earlier_row_bit_identical`, both specs, windows 4 and 256 |
+| Prefix-consistency passes on real segments, cloud-side | Pass | **300/300** split points, 50 random segments × 3 splits × 2 specs, bit-exact (run 32539968069) |
+| A deliberately introduced leak fails the audit | Pass | Two permanent tests rather than one manual drill: `test_a_forward_looking_median_window_fails_prefix_consistency` and `test_the_leaky_spec_fails_prefix_consistency_by_construction` |
+| Both specs frozen at `schema_version = 1` | Pass | `geo-v1` `bdb9bee03866`, `ret-v1` `d9bf2231a5e9`; a spec declaring any other version is refused at load |
+| Constants committed with a firewall-respecting generation manifest | Pass | `contract_constants_v1.yaml`, hash `e3929409d26e`, `firewall_respected: true` over 31,102,283 bars; a manifest saying otherwise does not load |
+| `firewall.yaml` hash-recorded in ADR-0021 | Pass | `94dd8b5072b01f746c03537450b6559180f21e87e3031fe22daad6c04719e871`, asserted by `test_the_firewall_config_hashes_to_what_adr_0021_records` |
+| Regression snapshot hashes committed, 5 series × 2 specs | Pass | `tests/snapshots/contract_v1.json` — BTCUSDT-1h, EURUSD-1h, AAPL-1d, XAUUSD-1d, ETHUSDT-1d |
+| Clip rates within bounds or investigated in writing | Pass | 36 combinations between 0.513 % and 0.896 %, one written investigation covering all of them; the first fit's 76 combinations up to 19.2 % were a real defect and were fixed |
+| Feature-distribution report available for v0.5 | Pass | `docs/reports/v0.4-contract-qa.md`, per (spec × class × frequency × feature) quantiles |
+| Usable-windows table corrected for the anchor-bar rule | Pass | **27,492,792**, superseding v0.3's 27,508,145 — exactly one window per segment |
+| Public API surface = exactly four functions | Pass | `test_the_package_exports_exactly_the_four_contract_functions`, plus a namespace test |
+| Leaky spec provably rejected by production paths | Pass | `transform` refuses it without `allow_leaky=True`; `inverse` refuses it outright; both tested |
+| Contract is pure — no import-time network or IO | Pass | AST pass over every top-level import in `axiom/contract/`, driver and config loader exempt and named |
+| **No tokenizer or quantizer code exists in the repo** | Pass | `grep -rniE 'quantiz|bsq|fsq|codebook|tokenizer' src/` returns eight hits, every one of them a docstring naming a future version |
+| Zero market-data bytes on laptop or home PC | Pass | Every corpus pass on a GitHub runner; the laptop read the segment index, the constants YAML and the report, all metadata |
+| Zero Kaggle GPU-hours; Modal spend < $5 | Pass | Kaggle never ran; Modal still behind the ADR-0009 gate, $0. GitHub Actions is unlimited on a public repo (ADR-0017) |
+| Nothing public | Pass | Source repo was already public; no data or model artifact was published |
+
+### The numbers
+
+| | |
+|---|---|
+| Segment-passes | 55,786 (27,893 segments × 2 specs) |
+| Bars streamed | 77,877,850 |
+| Feature rows produced | 77,822,064 |
+| NaN or Inf in output | **0** |
+| Prefix-consistency on real bars | **300/300** |
+| Context-512 windows | 27,492,792 |
+| Pre-firewall bars fitted | 31,102,283 across 23,758 segments |
+| Throughput | 6,950 bars/sec/core |
+| `schema_version` | 1 |
+| Constants hash | `e3929409d26e` |
+| Firewall | 2025-01-01T00:00:00Z, 19.6 months of post-firewall history |
+| Wall time | ~22 min fit, ~25 min dryrun |
+| Cost | $0 |
+
+### Deviations from the v0.4 plan
+
+1. **ADRs are 0020 and 0021**, not 0017/0018 — those numbers were taken by v0.2 and v0.3.
+2. **Configs live in `src/axiom/configs/`**, where every other config lives; there is no top-level
+   `configs/`. Same deviation v0.3 recorded.
+3. **The rolling median is numpy, not `bottleneck`.** The plan named a fallback ladder with
+   `bottleneck` at the top. The measured cost of the numpy path — 6,950 bars/sec/core, both corpus
+   passes inside an hour — did not justify a dependency. `bottleneck` stays the documented upgrade
+   path and ADR-0020 carries the arithmetic to re-check it against at corpus M1.
+4. **"Non-contiguous `ts`" is read as "strictly increasing".** The plan asks the contract to reject
+   a segment whose timestamps skip a grid step. Every FX segment in the corpus skips weekends, and
+   the clean layer already adjudicated which absences are boundaries (ADR-0018), so the literal
+   reading would reject a quarter of the corpus for being correct.
+5. **`scale` is `max(IQR/1.349, (q99 − q1)/4.6527)`, not IQR/1.349.** Forced by measurement: the
+   first fit clipped 19.2 % of the FX daily gap feature because IQR was measuring a spike at zero.
+   The Phase E gate asks for exactly this investigation, and this is its outcome.
+6. **The live-fire drill is two permanent tests rather than a one-off.** The plan asks for an
+   injected leak, once, referenced in a PR. Freezing it as a test costs the same and cannot be
+   forgotten — and the exercise found something the plan's version would have missed: a median
+   window that includes bar `t` itself is still prefix-consistent, so the drill has to inject a
+   *forward-looking* window. Same-bar self-normalization is caught by a separate boundary test.
+7. **No `api.py`.** The plan named a module holding the four-function surface; `__init__.py` is
+   that module. A second file re-exporting from a third would be the indirection the
+   single-implementation rule exists to prevent.
+
+### What G2 hands to v0.5
+
+The wick features are the finding. `upper` is never negative and `lower` never positive, so
+scaling a half-distribution by a symmetric spread puts the whole short side inside half a unit and
+spends the entire clip budget on one tail — which is where 36 of the residual clip flags come from.
+A symmetric quantizer range would spend most of its levels on a side of the axis the feature cannot
+reach. Quantizer range selection is a v0.4 non-goal by design; this is the measurement it was
+deferred to.
+
+The geo-v1 against ret-v1 comparison separates the two by nothing: clip rates agree within 0.11
+percentage points in every slice. That is the intended result — the A/B is decided by tokenizer
+reconstruction, not by which distribution reads more tidily.
+
+---
+
 ## v0.3 "Clean" — exit checklist passed 2026-08-21
 
 **The gate:** roadmap §4/v0.3 — all cleaning tests green; per-rule drop statistics reported per

@@ -41,8 +41,8 @@ somewhere specific.
 
 - **The frozen scaling constants**, fitted over **31,102,283 pre-firewall bars** across 23,758
   segments, 0 artifacts failed. Per (asset class × frequency × feature), robust median and
-  IQR/1.349, committed to the repo because constants are part of the contract and a constants file
-  living somewhere else can drift from the transform that reads it.
+  `max(IQR/1.349, (q99 − q1)/4.6527)`, committed to the repo because constants are part of the
+  contract and a constants file living somewhere else can drift from the transform that reads it.
 
 - **The temporal firewall at 2025-01-01** (ADR-0021), pulled forward from v0.5 deliberately: a
   constant fitted before the boundary is chosen is a constant that chose the boundary. It leaves
@@ -63,7 +63,30 @@ somewhere specific.
 
 - **`axiom contract fit-constants | dryrun | show`**, a GitHub workflow and a Modal twin.
 
+- **`docs/reports/v0.4-contract-qa.md`.** Both specs over the whole corpus: **77,822,064 feature
+  rows, 0 NaN/Inf, 300/300 prefix-consistency on real segments**, per-slice distributions, and the
+  geo-v1 against ret-v1 comparison v0.5 designs its quantizer ranges against. Cost $0 — two corpus
+  passes on GitHub Actions runners, zero Modal credits, zero GPU-hours, zero market-data bytes on
+  the laptop.
+
+- **Regression snapshot hashes** for five pinned series × two specs, in
+  `tests/snapshots/contract_v1.json`. Any future contract change that moves a number moves these,
+  and no data leaves the cloud to check it.
+
 ### Fixed
+
+- **The fitted scale was set by a spike at zero.** The first corpus dryrun clipped **19.2 %** of
+  the FX daily gap feature and over 0.5 % on 76 of 84 combinations. A daily FX bar opens where the
+  previous one closed, so the middle 50 % of the gap feature spans about 2.5e-5 — IQR/1.349 was
+  measuring the width of that spike and reporting it as the scale of the feature, putting every
+  real gap tens of sigma out. Flooring the scale with `(q99 − q1)/4.6527` took the worst slice to
+  **0.896 %**. Both estimators are normal-consistent, so on a well-behaved feature they agree and
+  the floor does nothing.
+
+  Thirty-six combinations still sit between 0.513 % and 0.896 %, and they are not being tuned away:
+  they are the one-sided wick features, where scaling a half-distribution by a symmetric spread
+  spends the whole clip budget on one tail. That is v0.5's problem — the wicks want an asymmetric
+  quantizer range — and it is written up in the report.
 
 - **`inverse` produced bars the schema refuses.** Float32 emission rounds a zero-volume bar to a
   hair below zero, and `expm1` faithfully returns −1.5e−10; a wick of exactly zero can round to put
@@ -82,6 +105,9 @@ somewhere specific.
   bounded and futures are dropped as they are consumed.
 
 ### Changed
+
+- **The usable-window count is corrected for the anchor-bar rule**: **27,492,792** context-512
+  windows, against the 27,508,145 v0.3 published. The difference is exactly one per segment.
 
 - `docs/LIMITATIONS.md` records the per-class scaling trade-off. One `scale` covers every
   instrument in an asset class, and the volatility spread inside "crypto" is wide. Per-series

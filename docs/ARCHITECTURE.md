@@ -18,7 +18,7 @@ raw bars → clean → contract (schema_version=1) → BSQ tokenizer → MDS sha
 | C3 | Storage: Parquet layout, provenance manifests, corpus registry | v0.1–v0.2 | **Built** — schema, layout, manifests and registry |
 | C4 | Cleaning: Kronos Algorithm 1, Table 4 thresholds, split/dividend policy | v0.3 | **Built** — segment index, session-aware gaps, total-return policy |
 | C5 | Preprocessing contract: candle geometry, causal normalization, golden vectors | v0.4 | **Built** — two frozen specs, frozen constants, prefix-consistency audit |
-| C6 | Tokenizer: BSQ default, flat FSQ ablation, temporal firewall | v0.5 | Unblocked, pending G2 sign-off |
+| C6 | Tokenizer: BSQ default, flat FSQ ablation, temporal firewall | v0.5 | Unblocked — G2 passed 2026-08-22 |
 | C7 | Pre-tokenization: uint16 token pairs, time features, conditioning IDs, MDS shards | v0.6 | Not started |
 | C8 | AR decoder: adapted Kronos, 25 M params, dual head, conditioning embeddings | v0.7 | Not started |
 | C9 | Evaluation: CRPS, PIT, RankIC, volatility vs GARCH, five baselines | v0.8 | Not started |
@@ -128,7 +128,7 @@ corrected table is in `docs/reports/v0.4-contract-qa.md`.
 functions. When v0.9's Predictor needs a feature the contract does not emit, the correct move is
 `schema_version = 2` and a retrained model — not a second transform beside this one.
 
-Next up is C6, the tokenizer, in v0.5. Gate **G2** stands between it and any tokenizer work.
+Next up is C6, the tokenizer, in v0.5. Gate **G2** passed on 2026-08-22, which is what unblocks it.
 
 ## What v0.2 built
 
