@@ -82,8 +82,24 @@ else. v0.5 decides the survivor.
 
 ### Price scaling: frozen affine constants, per (asset class × frequency × feature)
 
-`center` is a robust median and `scale` an IQR/1.349, fitted once over **pre-firewall bars only**
-(ADR-0021) and committed to `src/axiom/configs/contract_constants_v1.yaml`. No runtime fitting.
+`center` is a robust median and `scale` a normal-consistent robust spread, fitted once over
+**pre-firewall bars only** (ADR-0021) and committed to
+`src/axiom/configs/contract_constants_v1.yaml`. No runtime fitting.
+
+The spread is `max(IQR/1.349, (q99 - q1)/4.6527)`, and the floor is the outcome of the Phase E
+red-flag review rather than a refinement chosen up front. Fitted on IQR alone, the first corpus
+pass clipped **19.2 %** of the FX daily gap feature, 15.5 % of FX daily volume, and over 0.5 % on
+76 of the 84 (spec, class, frequency, feature) combinations.
+
+The cause is the shape of the distributions, not a defect in the fit. A daily FX bar opens where
+the previous one closed, near enough that the middle 50 % of the gap feature spans about 2.5e-5 —
+so IQR/1.349 measures the width of a spike at zero and reports it as the scale of the feature.
+Every real gap is then tens of sigma out and saturates. The same shape appears in the flow
+features wherever a vendor publishes a repeated volume.
+
+Both estimators are normal-consistent, so on a well-behaved feature they agree and the floor is a
+no-op. They diverge exactly when the centre is degenerate relative to the tails, which is when the
+IQR is the wrong summary.
 
 The honest cost: a class's constants are a compromise across every instrument in it, and the
 volatility spread inside "crypto" is wide. Three things absorb that — the clip, the quantizer range
@@ -166,10 +182,16 @@ The plan named `bottleneck.move_median` as the default with pandas and a two-hea
 as fallbacks. **Deviation:** the implementation is the numpy sliding-window path — blocked
 `np.median` over `sliding_window_view` — and no new dependency was added.
 
-The reason is arithmetic. The Phase E corpus pass computes about 155 million rolling medians
-(38.8 M bars × 2 flow features × 2 specs). The numpy path measures fast enough that the pass fits
-comfortably in the job's budget, and a dependency bought nothing measurable. `bottleneck` remains
-the documented upgrade path if v0.6's throughput requirement changes the arithmetic.
+The reason is measured rather than argued. The Phase E corpus pass runs at **7,971 bars/sec/core**
+and finishes 77.8 M feature rows across both specs in about twenty minutes of wall clock on one
+four-core runner. That is two orders of magnitude under the plan's 1 M bars/sec/core target, and it
+does not matter: v0.6 pre-tokenizes one spec over 38.8 M bars, which is under ninety core-minutes
+and trivially parallel.
+
+`bottleneck.move_median` is O(n log L) against this implementation's O(n·L) and would be roughly
+thirty times faster. It stays the documented upgrade path, and the number to re-check it against is
+the one above. If corpus M1 lands (0.25–0.3 B bars, decided at G3), re-run that arithmetic before
+assuming this still holds.
 
 ### The leaky baseline exists, guarded
 

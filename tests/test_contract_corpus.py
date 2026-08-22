@@ -174,6 +174,32 @@ def test_a_distribution_with_no_spread_at_all_is_refused() -> None:
         sketch.center_scale()
 
 
+def test_a_spike_at_zero_does_not_set_the_scale() -> None:
+    """The Phase E red-flag fix, as a test.
+
+    Ninety per cent of the mass sits at exactly zero and the rest is a real distribution around
+    +-1. IQR/1.349 measures the spike and returns roughly nothing, which is how the first corpus
+    fit came to clip 19 % of the FX daily gap feature. The 1-99 floor sees the tails.
+    """
+    sketch = Sketch()
+    sketch.add(np.zeros(90_000))
+    sketch.add(np.random.default_rng(4).normal(0.0, 1.0, 10_000))
+
+    _, scale = sketch.center_scale()
+
+    assert scale > 0.1
+
+
+def test_the_floor_does_nothing_to_a_well_behaved_distribution() -> None:
+    """Both estimators are normal-consistent, so on a normal they agree."""
+    sketch = Sketch()
+    sketch.add(np.random.default_rng(5).normal(0.0, 2.0, 500_000))
+
+    _, scale = sketch.center_scale()
+
+    assert scale == pytest.approx(2.0, rel=0.02)
+
+
 def test_a_sketch_survives_the_round_trip_through_its_transport_form() -> None:
     sketch = Sketch()
     sketch.add(np.random.default_rng(2).normal(0, 1, 5_000))

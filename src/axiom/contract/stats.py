@@ -54,6 +54,11 @@ REPORT_QUANTILES = (0.001, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 0.999)
 #: standard-deviation estimate that a fat tail cannot drag around.
 IQR_TO_SIGMA = 1.349
 
+#: The 1-99 range of a normal distribution, in standard deviations. The same normalization one
+#: quantile pair further out, and the reason it is here is measured rather than theoretical --
+#: see :meth:`Sketch.center_scale`.
+P98_TO_SIGMA = 4.6527
+
 
 @dataclass
 class Sketch:
@@ -130,23 +135,41 @@ class Sketch:
         return self.quantile(hi) - self.quantile(lo)
 
     def center_scale(self) -> tuple[float, float]:
-        """Robust location and spread: the median, and IQR/1.349.
+        """Robust location and spread: the median, and IQR/1.349 **floored by (q99-q1)/4.6527**.
 
-        An unresolvable IQR is not a fit failure to paper over with an epsilon — it means half the
-        mass of a whole asset class sits inside one bin, which for a gap feature would mean the
-        class opens within a hundredth of a percent of where it closed more often than not.
-        Widen to the 10-90 range once, then refuse.
+        The floor is the outcome of the v0.4 Phase E red-flag review, and it is worth reading
+        before anybody removes it. Fitted on IQR alone, the first corpus pass clipped **19.2 %** of
+        the FX daily gap feature, 15 % of FX daily volume, and over 0.5 % on 76 of the 84
+        (spec, class, frequency, feature) combinations in the corpus.
+
+        The cause is not a bug, it is the shape of these distributions. A daily FX bar opens where
+        the previous one closed, near enough that the middle 50 % of the gap feature spans about
+        2.5e-5 — so IQR/1.349 measures the width of a spike at zero and calls it the scale of the
+        feature. Every real gap is then tens of sigma out and saturates.
+
+        Both estimators are normal-consistent, so on a well-behaved feature they agree and the
+        floor does nothing. They diverge exactly when the centre is degenerate relative to the
+        tails, which is when the IQR is the wrong summary. Taking the larger is the smallest change
+        that stops a clip bound being set by a spike.
+
+        Refusing outright is still the answer when neither estimator resolves anything: half the
+        mass of a whole asset class inside one bin is a finding, not something to divide by
+        epsilon.
         """
         center = self.quantile(0.5)
+        candidates = []
         iqr = self._spread(0.25, 0.75)
-        scale = iqr / IQR_TO_SIGMA if iqr is not None else None
-        if scale is None:
-            decile = self._spread(0.1, 0.9)
-            scale = decile / 2.563 if decile is not None else None
+        if iqr is not None:
+            candidates.append(iqr / IQR_TO_SIGMA)
+        p98 = self._spread(0.01, 0.99)
+        if p98 is not None:
+            candidates.append(p98 / P98_TO_SIGMA)
+        scale = max(candidates) if candidates else None
         if scale is None or scale <= 0.0 or not np.isfinite(scale):
             raise ValueError(
-                "degenerate distribution: the 10-90 range does not span a single histogram bin, "
-                f"so no affine scaling can be fitted to it (n={self.total}, median={center})"
+                "degenerate distribution: neither the 25-75 nor the 1-99 range spans more than a "
+                f"single histogram bin, so no affine scaling can be fitted to it "
+                f"(n={self.total}, median={center})"
             )
         return center, scale
 

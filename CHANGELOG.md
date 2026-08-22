@@ -6,6 +6,98 @@ versioning with git tags.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-22
+
+The preprocessing contract, frozen. Two parameterizations of a bar sequence into six causal
+features, behind four functions that training pre-tokenization and the inference Predictor will
+both import — so a drift between what the model is trained on and what it is asked to predict
+from becomes a test failure rather than a silent skew.
+
+Causality is a property here, not a claim. `transform(bars[:t+1])` is exactly the first `t` rows
+of `transform(bars)`, bit for bit, and everything else in this version is that requirement applied
+somewhere specific.
+
+### Added
+
+- **`axiom.contract`** (ADR-0020). `load_spec`, `load_constants`, `transform`, `inverse`, and
+  nothing else — a test asserts the package exports exactly those four plus `SCHEMA_VERSION`.
+
+  Two specs are frozen at `schema_version = 1`. `geo-v1` is the primary: gap, body, upper wick,
+  lower wick, plus two flow features. Its structural identities — `upper >= max(0, body)` and
+  `lower <= min(0, body)` — are why it is primary; four independent log-returns spend model
+  capacity relearning that high is above low. `ret-v1` is the A/B challenger, identical in every
+  respect a consumer can see, so v0.5's reconstruction study measures the parameterization and
+  nothing else.
+
+  Volume and amount are `log1p` minus the median of `log1p` over the bars **strictly before** the
+  one being scaled — expanding from the segment start until it reaches 256 bars, then rolling. No
+  prior blending and no cold-start constant: the expanding phase is the warm-up, and a training
+  segment passes through the same phase, so an inference context shorter than the window sees a
+  distribution the model has genuinely trained on.
+
+  Bar 0 of every segment is the **anchor** and produces no feature row. It seeds the gap feature,
+  the first strictly-past median, and the Predictor's price inversion. Usable windows are
+  therefore `Σ max(0, (n_bars − 1) − 511)`, one fewer per segment than v0.3 published.
+
+- **The frozen scaling constants**, fitted over **31,102,283 pre-firewall bars** across 23,758
+  segments, 0 artifacts failed. Per (asset class × frequency × feature), robust median and
+  IQR/1.349, committed to the repo because constants are part of the contract and a constants file
+  living somewhere else can drift from the transform that reads it.
+
+- **The temporal firewall at 2025-01-01** (ADR-0021), pulled forward from v0.5 deliberately: a
+  constant fitted before the boundary is chosen is a constant that chose the boundary. It leaves
+  19.6 months of post-firewall history in the shortest M0 slice, against an 18-month floor.
+  Enforcement is in code — the fit truncates before computing anything, records the `max(ts)` it
+  consumed, and a constants file whose manifest says the assertion failed does not load at all.
+
+- **The causality audit.** Prefix-consistency and perturbation-invariance, property-tested on
+  generated series and tagged `@causality` so v0.8's leakage tripwires select on the marker rather
+  than on file names. Two permanent tests prove the audit can fail: a forward-looking median
+  window, and the leaky `kronos-zscore-v0` baseline, which exists only so v0.5 can put a number on
+  what Kronos's per-window z-score buys in reconstruction. Production paths refuse it.
+
+- **Six golden fixtures × two specs, checked twice.** Once against frozen output, and once against
+  a second implementation written from ADR-0020's formulas rather than from `axiom.contract` —
+  plain Python, `statistics.median`, one bar at a time. Frozen output alone would only prove the
+  implementation has not changed, including if it was wrong the day it was frozen.
+
+- **`axiom contract fit-constants | dryrun | show`**, a GitHub workflow and a Modal twin.
+
+### Fixed
+
+- **`inverse` produced bars the schema refuses.** Float32 emission rounds a zero-volume bar to a
+  hair below zero, and `expm1` faithfully returns −1.5e−10; a wick of exactly zero can round to put
+  `high` an ulp under `open`. Reconstructed bars are now projected onto the valid-candle set, which
+  also matters for v0.9, where a model samples feature rows freely and nothing stops it sampling an
+  upper wick below the body.
+
+- **The quantile sketch could not resolve a log-price IQR.** Uniform bins over raw feature units
+  cannot span ±20 for a flow feature and still resolve an hourly body's interquartile range of
+  about 10⁻³. Bins are now uniform in `asinh(x / 1e-4)`, which holds relative resolution near
+  0.05 % across the whole support.
+
+- **The corpus fan-out queued every artifact up front**, so each completed result — about 6 MB of
+  sketches — stayed alive inside its `Future` until the consumer reached it. The first corpus-wide
+  fit was killed at 3,000 of 10,647 with nothing in the log but a cancellation. Submission is now
+  bounded and futures are dropped as they are consumed.
+
+### Changed
+
+- `docs/LIMITATIONS.md` records the per-class scaling trade-off. One `scale` covers every
+  instrument in an asset class, and the volatility spread inside "crypto" is wide. Per-series
+  adaptive scaling is a named post-1.0 experiment, rejected here because a per-series statistic is
+  a per-series fit, and a fit at inference time is the failure the contract exists to prevent.
+
+### Deviations from the plan
+
+Both recorded in ADR-0020. The rolling median is the numpy sliding-window path rather than a new
+`bottleneck` dependency — the corpus arithmetic does not need it, and `bottleneck` stays the
+documented upgrade path. And the plan's "non-contiguous `ts`" rejection reads as "strictly
+increasing": a 24x5 series legitimately skips a weekend, the clean layer already adjudicated which
+absences are boundaries (ADR-0018), and requiring grid contiguity would reject every FX segment in
+the corpus.
+
+
 ## [0.3.1] - 2026-08-22
 
 The v0.3 gate left one thing on the list: all 12,425 Stooq sidecars still recorded
