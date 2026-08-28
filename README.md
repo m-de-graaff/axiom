@@ -4,7 +4,7 @@
 
 Axiom fine-tunes and extends [Kronos](https://github.com/shiyu-coder/Kronos) (Shi et al. 2025, MIT — see `NOTICE`) for crypto K-line forecasting, converts Monte-Carlo forecast paths into calibrated bull/bear probabilities, and serves them to a dashboard and a risk-gated trading loop. Built by one person; engineered like it will eventually route real money — because it might.
 
-> **Status:** Phase 1 — Data foundation · see [`TODO.md`](TODO.md) · plan: [`docs/AXIOM_BUILD_ORDER.md`](docs/AXIOM_BUILD_ORDER.md) · rules: [`CLAUDE.md`](CLAUDE.md)
+> **Status:** Phase 2 — Eval harness · see [`TODO.md`](TODO.md) · plan: [`docs/AXIOM_BUILD_ORDER.md`](docs/AXIOM_BUILD_ORDER.md) · rules: [`CLAUDE.md`](CLAUDE.md)
 
 ## Architecture
 
@@ -101,6 +101,27 @@ Conventions that are load-bearing, all enforced by tests:
   config plus the content of every bar it used, and refuses to run on a corpus that fails QA.
   The manifest (`data/datasets/{name}/manifest.json`) records the hash, git SHA and window
   counts per split.
+
+## Evaluation (Phase 2)
+
+`axiom-eval` is the frozen measuring stick: nothing about the model or the preprocessing changes
+without before/after numbers from it. Full detail in [`docs/eval.md`](docs/eval.md).
+
+```bash
+uv run axiom-eval run --config configs/eval/default.yaml          # -> reports/{run_id}/
+uv run axiom-eval run --config configs/eval/default.yaml     --models persistence ewma --timeframes 1h --max-anchors 4     # laptop smoke, no GPU
+modal run infra/modal_app/eval.py                                 # the same run on an L4
+```
+
+- **RankIC** (cross-sectional Spearman + t-stat), **directional accuracy net of round-trip
+  costs**, MAE/RMSE on log returns, and **calibration** of the MC fan (10–90 coverage + PIT),
+  each sliced by year and realized-vol tercile.
+- **The humiliation panel**: persistence, EWMA drift+vol and LightGBM are scored on exactly the
+  same windows. If Axiom can't beat LightGBM net of costs, scaling is not the bottleneck.
+- **Leakage rules are asserts, not intentions** — context and horizon inside the embargoed
+  split, no window across a data gap, context-only normalization, ex-ante universe.
+- Every run is reproducible from a committed YAML + git SHA + dataset hash, seeded per window
+  so results don't depend on evaluation order or sharding.
 
 ## Benchmarks
 

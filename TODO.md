@@ -43,20 +43,31 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 
 ## Phase 2 — Eval Harness (Days 5–10, overlaps P1) — *CPU except model-dependent runs*
 
-- [ ] **P2-01** RankIC (per-timestamp cross-sectional Spearman) + t-stat
-- [ ] **P2-02** Directional accuracy vs **cost-aware** threshold (from `configs/eval/default.yaml`)
-- [ ] **P2-03** MAE/RMSE on log-returns
-- [ ] **P2-04** Calibration: empirical 10–90 band coverage + PIT histogram
-- [ ] **P2-05** Slicing: by year and realized-vol tercile
-- [ ] **P2-06** Baselines: persistence, EWMA drift+vol
-- [ ] **P2-07** Baseline: LightGBM on lagged return/vol/volume features, walk-forward refit
-- [ ] **P2-08** (Optional) Chronos-Bolt zero-shot adapter as extra baseline
-- [ ] **P2-09** vectorbt "tripwire" long/flat threshold strategy with fees + slippage
-- [ ] **P2-10** CLI `axiom-eval run --config …` → `reports/{run_id}/` (HTML + metrics JSON) + W&B run
-- [ ] **P2-11** Leakage checklist enforced as asserts (no future bars, embargo, context-only normalization, ex-ante universe)
-- [ ] **P2-12** Determinism: fixed seeds; standard `mc_samples=64`, `T=1.0`, `top_p=0.9`
-- [ ] **P2-13** Cross-machine reproduction: laptop CPU vs Modal L4 within tolerance (+ XTX when available)
-- [ ] **GATE P2 ✅** zero-shot `axiom-zero-*` + all baselines evaluated · reproduces on 2 machines · report auto-generated
+- [x] **P2-01** RankIC (per-timestamp cross-sectional Spearman) + t-stat
+- [x] **P2-02** Directional accuracy vs **cost-aware** threshold (from `configs/eval/default.yaml`)
+- [x] **P2-03** MAE/RMSE on log-returns
+- [x] **P2-04** Calibration: empirical 10–90 band coverage + PIT histogram. Needed the individual
+      MC paths, so the vendored generation loop gained a behaviour-preserving `reduce="none"`
+- [x] **P2-05** Slicing: by year and realized-vol tercile
+- [x] **P2-06** Baselines: persistence, EWMA drift+vol
+- [x] **P2-07** Baseline: LightGBM on lagged return/vol/volume features. **No walk-forward
+      refit**: an expanding refit inside the test period fits on test bars (CLAUDE.md rule 3) and
+      would hand the baseline an advantage the models don't get. Fit once on train+val; rationale
+      in `docs/eval.md`
+- [ ] **P2-08** (Optional) Chronos-Bolt zero-shot adapter as extra baseline — not implemented
+- [x] **P2-09** "Tripwire" long/flat threshold strategy with fees + slippage. **Without vectorbt**:
+      the strategy the build order describes is 25 lines of pandas (`metrics.tripwire`); the
+      dependency is worth it for nautilus_trader in P8, not for this
+- [x] **P2-10** CLI `axiom-eval run --config …` → `reports/{run_id}/` (HTML + metrics JSON + panel
+      parquet + both configs) + optional W&B run
+- [x] **P2-11** Leakage checklist enforced as asserts (no future bars, embargo, context-only normalization, ex-ante universe)
+- [x] **P2-12** Determinism: per-window seeds derived from `sha256(seed|model|symbol|tf|anchor)`,
+      so results don't depend on evaluation order or sharding; `mc_samples=64`, `T=1.0`, `top_p=0.9`
+- [~] **P2-13** Cross-machine reproduction: `infra/modal_app/eval.py` written and the local CPU
+      leg is green; the Modal L4 leg still has to be *run* and the two reports compared
+- [ ] **GATE P2** zero-shot `axiom-zero-*` + all baselines evaluated · reproduces on 2 machines · report auto-generated
+      — harness done and smoke-tested end to end on the real corpus (baselines + `axiom-zero-small`,
+      1h); the full scoring run over {mini, small, base} × {15m, 1h, 4h} is a GPU job, not a laptop one
 
 ## Phase 3 — Zero-Shot Baseline & Fine-Tune → **M1** (Weeks 2–3)
 

@@ -8,14 +8,58 @@ baselines:
   persistence: true
   ewma: true
   lightgbm: true
-  chronos_bolt: false
+  chronos_bolt: false          # P2-08, optional; not implemented
 mc:
   samples: 64
   temperature: 1.0
   top_p: 0.9
-costs:                       # round-trip cost = 2 * (taker_fee + slippage)
+  top_k: 0
+costs:                         # round-trip cost = 2 * (taker_fee + slippage)
   taker_fee_bps: 10
   slippage_bps: 7
 metrics: [rankic, dir_acc_cost, mae_logret, rmse_logret, coverage_10_90, pit]
 slices: [year, vol_tercile]
 report_dir: reports/
+
+# Which windows get scored. Anchors sit on a shared epoch-aligned grid so every
+# symbol is evaluated at the same timestamps — that is what makes the
+# cross-sectional RankIC meaningful. See docs/eval.md.
+panel:
+  timeframes: [15m, 1h, 4h]
+  horizons: [6, 12, 24]        # must be a subset of the data config's horizons
+  stride_bars: 48              # anchor grid spacing, in bars of the timeframe
+  max_anchors: 60              # per timeframe, evenly spaced over the split
+  min_symbols: 10              # thinner cross-sections are dropped from RankIC
+  vol_window: 96               # context bars behind the realized-vol slice
+  band: [0.1, 0.9]             # calibration band (coverage target = 0.8)
+
+# EWMA drift+vol baseline (P2-06).
+ewma:
+  halflife_bars: 24
+
+# LightGBM baseline (P2-07). Fit on the non-test splits only — an expanding
+# walk-forward refit would fit on test bars, which CLAUDE.md rule 3 forbids.
+lightgbm:
+  fit_splits: [train, val]
+  lags: [1, 2, 3, 6, 12, 24]
+  vol_windows: [24, 96]
+  train_stride_bars: 48
+  max_train_rows: 200000
+  num_boost_round: 300
+  params:                      # native LightGBM names (no scikit-learn in the venv)
+    learning_rate: 0.05
+    num_leaves: 31
+    min_data_in_leaf: 50
+    feature_fraction: 0.8
+    bagging_fraction: 0.8
+    bagging_freq: 1
+
+# Dumb long/flat tripwire (P2-09): enter when the forecast clears round-trip
+# costs, hold the horizon out. Not a backtest — nautilus_trader in Phase 8 is.
+strategy:
+  threshold_mult: 1.0          # trade when pred > threshold_mult * round-trip cost
+
+wandb:
+  enabled: true
+  project: axiom
+  entity: mark_degraaff-not-applicable   # the only entity that exists; see configs/finetune/crypto_v0.yaml

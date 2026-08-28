@@ -43,7 +43,9 @@ uv run pytest -q
 modal run infra/modal_app/smoke.py
 
 # evaluation & benchmarks
-uv run axiom-eval run --config configs/eval/default.yaml            # once implemented (P2)
+uv run axiom-eval run --config configs/eval/default.yaml            # -> reports/{run_id}/
+uv run axiom-eval run --config configs/eval/default.yaml     --models persistence ewma --timeframes 1h --max-anchors 4      # laptop smoke, no GPU
+modal run infra/modal_app/eval.py                                  # same run on an L4 (P2-13)
 uv run axiom-bench infer --model axiom-ft-crypto-v0 --symbols 50    # once implemented (P4)
 
 # Modal
@@ -109,6 +111,16 @@ data/               local only, gitignored
 
 ## Current status
 
+- **Phase: 2 — Eval harness: built, gate not yet met.** `axiom-eval run` scores models and the
+  baseline panel (persistence, EWMA, LightGBM) on a shared, epoch-aligned anchor grid and writes
+  `reports/{run_id}/` (HTML + metrics JSON + panel parquet + both configs), optionally to W&B.
+  Metrics: RankIC + t-stat, cost-aware directional accuracy, MAE/RMSE on log returns, 10–90
+  coverage + PIT, sliced by year and vol tercile, plus the long/flat cost tripwire. Leakage rules
+  are asserts. Spec and the three deliberate deviations from the build order (no vectorbt, no
+  LightGBM walk-forward refit, Chronos-Bolt skipped) are in `docs/eval.md`. Smoke-tested end to end
+  on the real corpus at 1h. **Still open for the gate:** the full zero-shot scoring run over
+  {mini, small, base} × {15m, 1h, 4h} (GPU) and the Modal L4 cross-machine leg (P2-13,
+  `infra/modal_app/eval.py`).
 - **Phase: 1 — Data foundation: complete.** 50-symbol Binance USDT universe frozen in
   `configs/universe_v1.yaml`, selected on train-period median daily volume (not a live
   snapshot) with a continuity screen; 1m spot history downloaded and CHECKSUM-verified,
@@ -122,8 +134,8 @@ data/               local only, gitignored
   pairs Binance lists today). Delisted-mid-history symbols are absent; `XMRUSDT` and
   `WAVESUSDT` were delisted during the test window and contribute no test windows.
   Reports must say so.
-- Next: **Phase 2 — eval harness.** Gate: zero-shot `axiom-zero-*` plus all baselines
-  evaluated, reproducing on two machines, report auto-generated.
+- Next: close the **P2 gate** (run the harness on Modal for the zero-shot grid + the
+  cross-machine comparison), then **Phase 3 — zero-shot baseline & first fine-tune**.
 
 ## When unsure
 

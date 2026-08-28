@@ -3,7 +3,12 @@ name = "axiom-eval"
 version = "0.0.1"
 description = "Axiom eval package"
 requires-python = ">=3.11"
-dependencies = ["pandas", "numpy", "scipy", "pyyaml"]
+# torch is NOT here (see CLAUDE.md) — only the model forecaster needs it, and it is
+# imported lazily so baselines run on a machine without it.
+dependencies = ["pandas", "numpy", "scipy", "pyyaml", "axiom-data", "lightgbm"]
+
+[project.scripts]
+axiom-eval = "axiom_eval.cli:main"
 
 [build-system]
 requires = ["hatchling"]
