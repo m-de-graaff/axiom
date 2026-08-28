@@ -1,0 +1,13 @@
+# Dataset build config — consumed by axiom_data (P1-10).
+universe: configs/universe_v1.yaml
+source_tf: 1m
+timeframes: [15m, 1h, 4h]
+resample: right_closed_right_labeled     # single tested implementation, see CLAUDE.md
+context_bars: 512                        # raised to 2048 at M2
+horizons: [6, 12, 24]
+normalization: upstream_v1               # MUST match training; spec: docs/normalization.md
+embargo_bars: 512
+splits:
+  train: { start: "2018-01-01", end: "2023-12-31" }
+  val:   { start: "2024-01-15", end: "2024-06-30" }
+  test:  { start: "2024-07-15", end: "2026-06-30" }   # READ-ONLY — harness access only
