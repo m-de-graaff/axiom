@@ -1,0 +1,12 @@
+Axiom includes and derives from Kronos:
+  https://github.com/shiyu-coder/Kronos
+  Copyright (c) the Kronos authors (Yu Shi et al.)
+  Licensed under the MIT License.
+
+Citation:
+  Shi et al., "Kronos: A Foundation Model for the Language of Financial
+  Markets", arXiv:2508.02739 (accepted at AAAI 2026).
+
+Pretrained weights loaded from Hugging Face "NeoQuasar" repositories retain
+their original licenses — check each model card before redistributing
+derived weights.

@@ -1,0 +1,10 @@
+[project]
+name = "axiom-model"
+version = "0.0.1"
+description = "Axiom model package"
+requires-python = ">=3.11"
+dependencies = ["numpy", "einops", "huggingface_hub", "safetensors", "pyyaml", "pandas"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

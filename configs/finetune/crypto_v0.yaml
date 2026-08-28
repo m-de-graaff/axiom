@@ -1,0 +1,21 @@
+# First fine-tune run (P3). Start from upstream finetune_csv defaults; after run 1,
+# change exactly ONE thing per run. TODO fields are filled from vendor/kronos configs.
+run_name: axiom-ft-102m-crypto1-512-v0
+seed: 1337
+precision: bf16
+init:
+  tokenizer: NeoQuasar/Kronos-Tokenizer-base
+  predictor: NeoQuasar/Kronos-base
+data: configs/data/crypto_v1.yaml
+stage_a_tokenizer:
+  enabled: true
+  epochs: TODO        # copy upstream default
+  lr: TODO
+  batch_size: TODO
+stage_b_predictor:
+  enabled: true
+  epochs: TODO
+  lr: TODO
+  batch_size: TODO
+log:
+  wandb_project: axiom

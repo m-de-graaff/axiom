@@ -1,0 +1,10 @@
+[project]
+name = "axiom-eval"
+version = "0.0.1"
+description = "Axiom eval package"
+requires-python = ">=3.11"
+dependencies = ["pandas", "numpy", "scipy", "pyyaml"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

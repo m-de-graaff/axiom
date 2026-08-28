@@ -1,0 +1,10 @@
+[project]
+name = "axiom-signals"
+version = "0.0.1"
+description = "Axiom signals package"
+requires-python = ">=3.11"
+dependencies = ["numpy", "pandas", "pyyaml"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

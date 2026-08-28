@@ -1,0 +1,21 @@
+# Frozen eval harness config (P2). Changing this file invalidates comparability —
+# bump a version suffix instead of editing in place once M1 work starts.
+seed: 1337
+data: configs/data/crypto_v1.yaml
+split: test
+models: [axiom-zero-mini, axiom-zero-small, axiom-zero-base]
+baselines:
+  persistence: true
+  ewma: true
+  lightgbm: true
+  chronos_bolt: false
+mc:
+  samples: 64
+  temperature: 1.0
+  top_p: 0.9
+costs:                       # round-trip cost = 2 * (taker_fee + slippage)
+  taker_fee_bps: 10
+  slippage_bps: 7
+metrics: [rankic, dir_acc_cost, mae_logret, rmse_logret, coverage_10_90, pit]
+slices: [year, vol_tercile]
+report_dir: reports/

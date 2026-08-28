@@ -1,0 +1,33 @@
+# Axiom universe v1 — Binance USDT spot pairs (+ matching USD-M perps for funding/OI).
+# TODO (P1-01): verify liquidity, add listing dates, expand toward ~50, then FREEZE
+# before Phase 2. Frozen universes only — no in-flight edits (survivorship hygiene).
+version: 1
+venue: binance
+quote: USDT
+perps: true            # also fetch USD-M futures klines + fundingRate for these bases
+symbols:
+  - BTCUSDT
+  - ETHUSDT
+  - SOLUSDT
+  - BNBUSDT
+  - XRPUSDT
+  - DOGEUSDT
+  - ADAUSDT
+  - AVAXUSDT
+  - LINKUSDT
+  - DOTUSDT
+  - LTCUSDT
+  - BCHUSDT
+  - NEARUSDT
+  - UNIUSDT
+  - ATOMUSDT
+  - APTUSDT
+  - ARBUSDT
+  - OPUSDT
+  - FILUSDT
+  - INJUSDT
+  - SUIUSDT
+  - AAVEUSDT
+  - ETCUSDT
+  - TRXUSDT
+  # TODO: extend to ~50 with listing dates: {symbol: PEPEUSDT, listed: "2023-05"}

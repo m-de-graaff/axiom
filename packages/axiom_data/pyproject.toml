@@ -1,0 +1,10 @@
+[project]
+name = "axiom-data"
+version = "0.0.1"
+description = "Axiom data package"
+requires-python = ">=3.11"
+dependencies = ["pandas", "pyarrow", "duckdb", "httpx", "pyyaml", "numpy"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

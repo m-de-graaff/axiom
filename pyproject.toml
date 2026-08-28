@@ -1,0 +1,41 @@
+[project]
+name = "axiom"
+version = "0.0.1"
+description = "Axiom: finance-native TSFM (Kronos fork) + signals + trading loop"
+requires-python = ">=3.11"
+# NOTE: torch is intentionally NOT listed — install per machine (CPU wheel on
+# the laptop, ROCm wheel on the XTX box, CUDA inside the Modal image).
+# See CLAUDE.md.
+dependencies = [
+  "axiom-model",
+  "axiom-data",
+  "axiom-eval",
+  "axiom-signals",
+  "axiom-trader",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.6", "pytest>=8"]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+axiom-model = { workspace = true }
+axiom-data = { workspace = true }
+axiom-eval = { workspace = true }
+axiom-signals = { workspace = true }
+axiom-trader = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["vendor", "apps", "data", "research"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
