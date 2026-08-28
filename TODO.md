@@ -21,7 +21,7 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 - [ ] **P0-07** *(GPU)* Smoke-test forecast via `AxiomPredictor`: **`modal run infra/modal_app/smoke.py`** (T4, works from the laptop) or CPU locally (slow, fine) or the XTX; output saved to `research/day1/`
 - [x] **P0-08** `modal setup`; hello-GPU function on T4 prints device name
 - [ ] **P0-09** Modal volumes `axiom-data`, `axiom-ckpts` created; secrets `wandb`, `postgres` created (placeholders OK)
-- [ ] **P0-10** GitHub repo + Actions CI green (`ruff` + `pytest`)
+- [x] **P0-10** GitHub repo + Actions CI green (`ruff` + `pytest`)
 - [ ] **P0-11** W&B project `axiom` created; one test run logged
 - [x] **P0-12** `AXIOM_BUILD_ORDER.md` moved into `docs/`; linked from README
 - [ ] **GATE P0 ✅** forecast runs (CPU **or** Modal GPU) · Modal GPU works · CI green · NOTICE in place
