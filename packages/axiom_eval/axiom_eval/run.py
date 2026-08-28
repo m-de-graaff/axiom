@@ -92,8 +92,12 @@ def build_panel(
     models: Sequence[str] | None = None,
     timeframes: Sequence[str] | None = None,
     symbols: Sequence[str] | None = None,
+    chunk: tuple[int, int] | None = None,
 ) -> pd.DataFrame:
-    """Score every configured forecaster over every configured timeframe."""
+    """Score every configured forecaster over every configured timeframe.
+
+    `chunk=(i, n)` scores only every n-th anchor — see `panel.cross_sections`.
+    """
     horizons, band = cfg.horizons, tuple(cfg.panel["band"])
     frames = []
     for tf in timeframes or cfg.panel["timeframes"]:
@@ -105,7 +109,7 @@ def build_panel(
             cfg, data_cfg, tf, root=root, device=device, models=models, symbols=symbols
         ):
             t0, n = time.time(), 0
-            for anchor, windows in cross_sections(cfg, data_cfg, tf, bars):
+            for anchor, windows in cross_sections(cfg, data_cfg, tf, bars, chunk):
                 frames.append(
                     _rows(fc, tf, anchor, windows, horizons, cfg.mc["samples"], cfg.seed,
                           band, cfg.panel["vol_window"])
@@ -114,7 +118,7 @@ def build_panel(
             print(f"  {tf:>4} {fc.name:<20} {n:>6} windows  {time.time() - t0:7.1f}s")
     if not frames:
         raise ValueError("empty panel — no windows scored (check the corpus and split bounds)")
-    return metrics.add_slices(pd.concat(frames, ignore_index=True))
+    return pd.concat(frames, ignore_index=True)
 
 
 def run(
@@ -164,11 +168,13 @@ def finalize(
 ) -> dict:
     """Panel in, `reports/{run_id}/` out.
 
-    Split out from `run` so a sharded run (one container per model x timeframe, see
-    `infra/modal_app/eval.py`) writes exactly the same report from the concatenated
-    panel. Per-window seeding is what makes that legitimate: sharding cannot change
-    a number.
+    Split out from `run` so a sharded run (see `infra/modal_app/eval.py`) writes
+    exactly the same report from the concatenated panel. Per-window seeding is what
+    makes that legitimate: sharding cannot change a number. Slices are cut *here*,
+    on the whole panel, for the same reason — vol-tercile edges cut per shard would
+    make the slice depend on how the work was split.
     """
+    panel = metrics.add_slices(panel)
     git_sha = _git_sha()
     run_id = f"{datetime.now(UTC):%Y%m%dT%H%M%S}-{cfg.name}-{git_sha[:7]}"
     dest = Path(out_dir or cfg.report_dir) / run_id

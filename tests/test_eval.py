@@ -14,6 +14,7 @@ from axiom_eval import forecasters, metrics
 from axiom_eval.panel import cross_sections, load_config, load_split_bars
 from axiom_eval.run import run
 from conftest import bars
+from pandas.testing import assert_frame_equal
 
 TF = "1h"
 CTX, HORIZONS = 8, [1, 2]
@@ -288,3 +289,40 @@ def test_model_forecaster_returns_log_returns_from_the_last_context_close(corpus
     assert np.isfinite(a).all()
     assert np.array_equal(a, b), "per-window seeding is not reproducible"
     assert np.abs(a).max() < 50, "returns are not on a log-return scale"
+
+
+def test_chunking_partitions_the_anchors_without_changing_them(corpus):
+    """Sharding is a scheduling detail: the union of chunks is the whole run."""
+    eval_config, _, root, _ = corpus
+    cfg, data_cfg, whole = sections(eval_config, root)
+    bars_by_symbol = load_split_bars(cfg, data_cfg, TF, root=root)
+    chunked = [
+        section
+        for i in range(3)
+        for section in cross_sections(cfg, data_cfg, TF, bars_by_symbol, chunk=(i, 3))
+    ]
+    assert sorted(a for a, _ in chunked) == sorted(a for a, _ in whole)
+    assert len({a for a, _ in chunked}) == len(chunked), "an anchor was scored twice"
+
+
+def test_a_chunked_forecast_is_identical_to_the_unchunked_one(corpus):
+    """Per-window seeding is what makes sharding safe — prove it, don't assume it."""
+    eval_config, _, root, _ = corpus
+    cfg, data_cfg, _ = sections(eval_config, root)
+    from axiom_eval.run import build_panel
+
+    whole = build_panel(cfg, data_cfg, root, models=["persistence"], timeframes=[TF])
+    parts = pd.concat(
+        [
+            build_panel(cfg, data_cfg, root, models=["persistence"], timeframes=[TF],
+                        chunk=(i, 2))
+            for i in range(2)
+        ],
+        ignore_index=True,
+    )
+    key = ["ts", "symbol", "horizon"]
+    assert_frame_equal(
+        metrics.add_slices(whole).sort_values(key).reset_index(drop=True),
+        metrics.add_slices(parts).sort_values(key).reset_index(drop=True),
+        check_like=True,
+    )

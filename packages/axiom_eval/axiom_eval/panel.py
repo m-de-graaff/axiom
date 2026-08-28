@@ -162,8 +162,15 @@ def cross_sections(
     data_cfg: datasets.DataConfig,
     tf: str,
     bars: dict[str, pd.DataFrame],
+    chunk: tuple[int, int] | None = None,
 ) -> Iterator[tuple[pd.Timestamp, list[Window]]]:
-    """Yield `(anchor, windows)` — one leak-checked cross-section per anchor timestamp."""
+    """Yield `(anchor, windows)` — one leak-checked cross-section per anchor timestamp.
+
+    `chunk=(i, n)` takes every n-th anchor starting at `i`, so a long run can be split
+    across containers without any of them losing sight of the whole split (each chunk
+    is interleaved, not a contiguous block — year and vol slices stay populated).
+    Chunking cannot change a number: forecasters are seeded per window.
+    """
     lo, hi = datasets.split_bounds(data_cfg, cfg.split, tf)
     ctx, hmax = data_cfg.context_bars, cfg.max_horizon
     per_symbol = {
@@ -175,7 +182,11 @@ def cross_sections(
         for symbol, part in bars.items()
     }
     grid = sorted({t for anchors in per_symbol.values() for t in anchors})
-    for anchor in _thin(np.array(grid), cfg.panel["max_anchors"]):
+    anchors = _thin(np.array(grid), cfg.panel["max_anchors"])
+    if chunk is not None:
+        index, total = chunk
+        anchors = anchors[index::total]
+    for anchor in anchors:
         windows = []
         for symbol, valid in per_symbol.items():
             if anchor not in valid:
