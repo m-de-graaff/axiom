@@ -24,22 +24,22 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 - [x] **P0-10** GitHub repo + Actions CI green (`ruff` + `pytest`)
 - [x] **P0-11** W&B project `axiom` created; one test run logged
 - [x] **P0-12** `AXIOM_BUILD_ORDER.md` moved into `docs/`; linked from README
-- [ ] **GATE P0 ✅** forecast runs (CPU **or** Modal GPU) · Modal GPU works · CI green · NOTICE in place
+- [x] **GATE P0 ✅** forecast runs (CPU **or** Modal GPU) · Modal GPU works · CI green · NOTICE in place
 
 ## Phase 1 — Data Foundation (Days 3–7) — *all CPU/laptop-friendly*
 
-- [ ] **P1-01** Finalize `configs/universe_v1.yaml`: ~50 USDT pairs, listing dates noted, frozen before Phase 2
-- [ ] **P1-02** `scripts/download_binance.py`: async spot 1m monthly zips, resume-safe, CHECKSUM-verified
-- [ ] **P1-03** Extend downloader: USD-M futures klines + fundingRate (+ OI metrics where available)
-- [ ] **P1-04** Fallback fetch path tested (Modal function or non-EU VPS) in case `data.binance.vision` is unreachable from NL
-- [ ] **P1-05** Parquet writer with `{venue}/{symbol}/{tf}/year=/month=` partitioning
-- [ ] **P1-06** Right-closed, right-labeled resampler 1m → {5m, 15m, 1h, 4h}; unit tests incl. gap/DST-adjacent cases
-- [ ] **P1-07** DuckDB query helpers in `axiom_data`
-- [ ] **P1-08** Data QA report (gaps, dupes, OHLC sanity, coverage); build fails on violations
-- [ ] **P1-09** Read upstream preprocessing; document scheme in `docs/normalization.md`; implement in `axiom_data.normalization` (single module)
-- [ ] **P1-10** Dataset builder: sliding windows (ctx ≤ 512, horizons), chronological splits + 512-bar embargo per `configs/data/crypto_v1.yaml`; prints dataset hash
-- [ ] **P1-11** Corpus synced to Modal `axiom-data` volume
-- [ ] **GATE P1 ✅** `build` reproduces identical dataset hash twice · QA clean · volume synced
+- [x] **P1-01** `configs/universe_v1.yaml` frozen: 50 USDT pairs (all listed before 2022-01), listing month + perp flag + volume snapshot per symbol; regenerate with `scripts/build_universe.py`
+- [x] **P1-02** `axiom-data download`: async spot 1m monthly zips, resume-safe, CHECKSUM-verified (`axiom_data.binance`)
+- [x] **P1-03** USD-M futures klines + fundingRate download *and* ingest (`--feed futures|funding`, venue `binance-um`). OI/metrics parsing deferred to M4, which is the first thing that uses it
+- [x] **P1-04** `infra/modal_app/download.py` — same downloader on Modal, writing straight to the volume (also the P1-11 path). binance.vision is reachable from NL today; this is the fallback if that changes
+- [x] **P1-05** `axiom_data.store`: `{venue}/{symbol}/{tf}/year=/month=` parquet, merge-on-write so the month-boundary bar survives re-ingest
+- [x] **P1-06** `axiom_data.resample`, right-closed/right-labeled, `ts` = bar close; unit tests + an opt-in network test proving 1m→1h equals Binance's own 1h klines exactly (`pytest --network`)
+- [x] **P1-07** DuckDB helpers `store.read` / `store.query` over the parquet tree
+- [x] **P1-08** `axiom-data qa` (gaps, dupes, OHLC sanity, zero-volume, coverage); thresholds in `configs/data/crypto_v1.yaml`, `build` refuses a dirty corpus
+- [x] **P1-09** `docs/normalization.md` written from upstream source; `axiom_data.normalization` is the single implementation, asserted against the upstream formula in tests
+- [x] **P1-10** `axiom-data build`: gap-free segment index (windows = offsets into segments), chronological splits, embargo enforced by full-window containment; prints the dataset hash
+- [x] **P1-11** Corpus on the Modal `axiom-data` volume, built there directly by `infra/modal_app/download.py` (no multi-GB upload)
+- [x] **GATE P1 ✅** hash `dc6d1a9d…` reproduces twice locally *and* on Modal (identical window counts) · QA clean on 50 symbols × 4 timeframes · corpus on the `axiom-data` volume
 
 ## Phase 2 — Eval Harness (Days 5–10, overlaps P1) — *CPU except model-dependent runs*
 
@@ -143,3 +143,4 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 - [ ] **B-04** AI SDK v6 evaluation: approval-gated `propose_trade` tool
 - [ ] **B-05** Publish Axiom weights (check NeoQuasar model-card licenses first) + model card
 - [ ] **B-06** Export this TODO to GitHub Issues (`gh issue create` script) if file-based tracking stops scaling
+- [ ] **B-07** Survivorship-free universe: enumerate every symbol ever published under `data/spot/monthly/klines/` on data.binance.vision (delisted ones are still hosted) and re-select `universe_v2` from that pool. Today's candidates come from the pairs Binance lists *now*, so coins that died before today are invisible to the screen

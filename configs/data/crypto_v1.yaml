@@ -11,3 +11,11 @@ splits:
   train: { start: "2018-01-01", end: "2023-12-31" }
   val:   { start: "2024-01-15", end: "2024-06-30" }
   test:  { start: "2024-07-15", end: "2026-06-30" }   # READ-ONLY — harness access only
+
+# QA tripwires (P1-08). These catch corruption, not quality: a quiet minute with no
+# trades is a real bar, a bar whose high is below its low is a broken file. Loosening
+# any of these to make a build pass is a CLAUDE.md violation -- fix the data instead.
+qa:
+  max_missing_bar_pct: 2.0     # per symbol/timeframe over its own covered range
+  max_zero_volume_pct: 30.0    # thin alts genuinely trade in bursts at 1m
+  min_bars: 1000

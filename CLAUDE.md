@@ -51,8 +51,12 @@ modal run infra/modal_app/train.py::train --config-yaml "$(cat configs/finetune/
 modal deploy infra/modal_app/infer_cron.py
 modal volume put axiom-data data/parquet /parquet
 
-# data
-uv run python scripts/download_binance.py --config configs/universe_v1.yaml
+# data (P1)
+uv run axiom-data download --config configs/universe_v1.yaml   # binance.vision zips
+uv run axiom-data ingest   --config configs/data/crypto_v1.yaml # -> parquet + resample
+uv run axiom-data qa       --config configs/data/crypto_v1.yaml
+uv run axiom-data build    --config configs/data/crypto_v1.yaml # prints dataset hash
+modal run infra/modal_app/download.py                           # same, straight to the volume
 ```
 
 ## Repo map
@@ -105,14 +109,21 @@ data/               local only, gitignored
 
 ## Current status
 
-- **Phase: 0 — Bootstrap: complete.** Scaffold, CPU torch, Kronos subtree, NOTICE/LICENSE,
-  `axiom_model` compat layer + registry, forecast smoke via `AxiomPredictor` on Modal T4
-  **and** local CPU, Modal volumes/secrets, public GitHub repo with CI green, W&B project
-  `axiom` logging. Phase 0 gate met. (Update this line as gates close; details in `TODO.md`.)
-- P0-01 (ROCm/XTX box) was set up previously for another project; its torch ROCm
-  wheel version still needs recording in `docs/rocm-notes.md` from that machine.
-- Next: **Phase 1 — data foundation.** Gate: `axiom-data build` reproducibly emits
-  train/val/test with a printed dataset hash, clean QA report, corpus on the Modal volume.
+- **Phase: 1 — Data foundation: complete.** 50-symbol Binance USDT universe frozen in
+  `configs/universe_v1.yaml`, selected on train-period median daily volume (not a live
+  snapshot) with a continuity screen; 1m spot history downloaded and CHECKSUM-verified,
+  ingested to partitioned Parquet and resampled to 15m/1h/4h; QA clean; `axiom-data build`
+  emits dataset hash `dc6d1a9d976d5efdcd98ba57df234be5a8ab75e79700efc10771fd4a9c1747aa`
+  reproducibly on the laptop (twice) **and** on Modal from the volume copy of the corpus,
+  with identical window counts; corpus on the `axiom-data` volume. Phase 1 gate met. (Update this line as gates close; details in `TODO.md`.)
+- Phase 0 complete. P0-01 (ROCm/XTX box) was set up previously for another project; its
+  torch ROCm wheel version still needs recording in `docs/rocm-notes.md` from that machine.
+- Known limitation carried into Phase 2: the universe is a survivor set (candidates are
+  pairs Binance lists today). Delisted-mid-history symbols are absent; `XMRUSDT` and
+  `WAVESUSDT` were delisted during the test window and contribute no test windows.
+  Reports must say so.
+- Next: **Phase 2 — eval harness.** Gate: zero-shot `axiom-zero-*` plus all baselines
+  evaluated, reproducing on two machines, report auto-generated.
 
 ## When unsure
 

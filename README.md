@@ -4,7 +4,7 @@
 
 Axiom fine-tunes and extends [Kronos](https://github.com/shiyu-coder/Kronos) (Shi et al. 2025, MIT — see `NOTICE`) for crypto K-line forecasting, converts Monte-Carlo forecast paths into calibrated bull/bear probabilities, and serves them to a dashboard and a risk-gated trading loop. Built by one person; engineered like it will eventually route real money — because it might.
 
-> **Status:** Phase 0 — Bootstrap · see [`TODO.md`](TODO.md) · plan: [`docs/AXIOM_BUILD_ORDER.md`](docs/AXIOM_BUILD_ORDER.md) · rules: [`CLAUDE.md`](CLAUDE.md)
+> **Status:** Phase 1 — Data foundation · see [`TODO.md`](TODO.md) · plan: [`docs/AXIOM_BUILD_ORDER.md`](docs/AXIOM_BUILD_ORDER.md) · rules: [`CLAUDE.md`](CLAUDE.md)
 
 ## Architecture
 
@@ -55,7 +55,7 @@ modal run infra/modal_app/smoke.py
 
 **No local GPU? No problem.** Every GPU task routes to Modal (`infra/modal_app/`): smoke on T4, subset fine-tunes on A10G/L4, full runs on A100, hourly signals on L4. A local GPU (the RX 7900 XTX) only speeds up iteration and adds the ROCm parity leg — it is never required.
 
-Then work `TODO.md` top-to-bottom, starting at **P0-04**.
+Then work `TODO.md` top-to-bottom, starting at **P2-01**.
 
 ## Repository layout
 
@@ -72,6 +72,35 @@ Then work `TODO.md` top-to-bottom, starting at **P0-04**.
 | `apps/dashboard` | Next.js dashboard + AI SDK chat (Phase 7) |
 | `db/schema.sql` | Postgres DDL |
 | `docs/` | Build order, normalization spec, ROCm notes, decision memos |
+
+## Data (Phase 1)
+
+The corpus is Binance bulk history: 1m spot klines for a frozen 50-symbol USDT universe,
+stored as partitioned Parquet and queried with DuckDB.
+
+```bash
+uv run axiom-data download --config configs/universe_v1.yaml    # monthly zips, CHECKSUM-verified, resumable
+uv run axiom-data ingest   --config configs/data/crypto_v1.yaml # -> parquet, resampled to 15m/1h/4h
+uv run axiom-data qa       --config configs/data/crypto_v1.yaml # gaps, dupes, OHLC sanity, coverage
+uv run axiom-data build    --config configs/data/crypto_v1.yaml # splits + embargo + dataset hash
+modal run infra/modal_app/download.py                           # the same, straight onto the Modal volume
+```
+
+Conventions that are load-bearing, all enforced by tests:
+
+- **`ts` is the bar's close time.** Binance and ccxt label bars with their *open* time; ingest
+  shifts them. A bar labeled with its close is complete at its label, so "context up to `ts`"
+  never contains the future. Resampling is right-closed and right-labeled to match, and
+  `pytest --network` checks our 1m→1h output against Binance's own 1h klines.
+- **Normalization lives in one module** (`axiom_data.normalization`, spec in
+  [`docs/normalization.md`](docs/normalization.md)), identical for training, eval and inference.
+- **Splits are chronological with an embargo**: every window's context *and* horizon lie inside
+  its own split, so no validation or test window can reach back into training bars. Test years
+  are read-only.
+- **The build is reproducible or it didn't happen**: `build` prints a dataset hash over the
+  config plus the content of every bar it used, and refuses to run on a corpus that fails QA.
+  The manifest (`data/datasets/{name}/manifest.json`) records the hash, git SHA and window
+  counts per split.
 
 ## Benchmarks
 

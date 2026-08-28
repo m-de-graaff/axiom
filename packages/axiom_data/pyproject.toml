@@ -5,6 +5,9 @@ description = "Axiom data package"
 requires-python = ">=3.11"
 dependencies = ["pandas", "pyarrow", "duckdb", "httpx", "pyyaml", "numpy"]
 
+[project.scripts]
+axiom-data = "axiom_data.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
