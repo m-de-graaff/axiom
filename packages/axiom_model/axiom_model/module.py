@@ -1,10 +1,16 @@
+"""Ported verbatim from vendor/kronos/model/module.py (upstream 67b630e).
+
+Byte-identical to upstream below this docstring, deliberately: it keeps
+`diff` against vendor/kronos meaningful. Ruff skips this file (pyproject).
+"""
+
 import math
 
+from einops import rearrange, reduce
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from einops import rearrange, reduce
 from torch.autograd import Function
+import torch.nn.functional as F
 
 
 class DifferentiableEntropyFunction(Function):
@@ -515,7 +521,7 @@ class DualHead(nn.Module):
 
 class FixedEmbedding(nn.Module):
     def __init__(self, c_in, d_model):
-        super().__init__()
+        super(FixedEmbedding, self).__init__()
 
         w = torch.zeros(c_in, d_model).float()
         w.require_grad = False
@@ -535,7 +541,7 @@ class FixedEmbedding(nn.Module):
 
 class TemporalEmbedding(nn.Module):
     def __init__(self, d_model, learn_pe):
-        super().__init__()
+        super(TemporalEmbedding, self).__init__()
 
         minute_size = 60
         hour_size = 24
