@@ -9,5 +9,9 @@ jobs:
         with:
           python-version: "3.11"
       - run: uv sync
+      # torch is deliberately not in any pyproject (CLAUDE.md) — installed per
+      # machine, and CI is a machine. CPU wheel: no CUDA, and the parity tests
+      # are required to run on CPU here.
+      - run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: uv run ruff check .
       - run: uv run pytest -q

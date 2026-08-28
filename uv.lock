@@ -135,6 +135,7 @@ dependencies = [
     { name = "pandas" },
     { name = "pyyaml" },
     { name = "safetensors" },
+    { name = "tqdm" },
 ]
 
 [package.metadata]
@@ -145,6 +146,7 @@ requires-dist = [
     { name = "pandas" },
     { name = "pyyaml" },
     { name = "safetensors" },
+    { name = "tqdm" },
 ]
 
 [[package]]

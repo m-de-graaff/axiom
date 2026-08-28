@@ -105,8 +105,13 @@ data/               local only, gitignored
 
 ## Current status
 
-- **Phase: 0 — Bootstrap.** Done: scaffold, CPU torch, Kronos subtree, NOTICE/LICENSE, Modal auth + T4 GPU smoke (upstream Kronos API, Kronos-small, forecast OK). (Update this line as gates close; details in `TODO.md`.)
-- Next gate: P0-06 `axiom_model` compat layer + registry, then re-run the smoke through `AxiomPredictor` (P0-07); Modal volumes/secrets (P0-09); GitHub Actions CI green (P0-10); W&B test run (P0-11).
+- **Phase: 0 — Bootstrap.** Closed: scaffold, CPU torch, Kronos subtree, NOTICE/LICENSE,
+  `axiom_model` compat layer + registry, forecast smoke via `AxiomPredictor` on Modal T4
+  **and** local CPU, Modal volumes/secrets, GitHub repo + CI green. (Update this line as
+  gates close; details in `TODO.md`.)
+- Open: **P0-11** W&B project + one test run (blocked on a `WANDB_API_KEY` on this machine),
+  and **P0-01** the ROCm/XTX box (optional, off the critical path). Next phase gate is P1 —
+  the data foundation.
 
 ## When unsure
 

@@ -18,3 +18,7 @@ no CUDA-only deps, keep --no-compile working, never assume a local GPU).
 - 2026-08-28 — Windows: the system `pip` launcher is broken (points at a
   removed `C:\Python314\python.exe`). Install CLI tools with
   `uv tool install <pkg>` instead; `modal` 1.5.4 is installed that way.
+- 2026-08-28 — `uv sync` uninstalls torch, because torch is deliberately absent
+  from every `pyproject.toml` and `uv sync` prunes anything undeclared. Reinstall
+  the per-machine wheel after a sync (or use `uv sync --inexact`). CI does the
+  same thing in order: `uv sync`, then the CPU wheel.

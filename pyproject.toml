@@ -37,5 +37,11 @@ extend-exclude = ["vendor", "apps", "data", "research"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# Ported verbatim from upstream Kronos (see NOTICE). Kept unreformatted so diffs
+# against vendor/kronos stay readable; lint them once they are actually refactored.
+"packages/axiom_model/axiom_model/_kronos.py" = ["E501", "F403", "F405"]
+"packages/axiom_model/axiom_model/module.py" = ["E501", "F403", "F405"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

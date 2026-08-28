@@ -17,10 +17,10 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 - [x] **P0-03** `scaffold.sh` run in empty folder; `git init`; first commit
 - [x] **P0-04** Vendor Kronos: `git subtree add --prefix vendor/kronos https://github.com/shiyu-coder/Kronos master --squash`
 - [x] **P0-05** Verify `NOTICE` (MIT attribution + citation) and `LICENSE` present
-- [ ] **P0-06** `axiom_model` compat layer: `AxiomTokenizer/Axiom/AxiomPredictor` subclasses; `registry.py` with `axiom-zero-{mini,small,base}` → `NeoQuasar/Kronos-*`
-- [ ] **P0-07** *(GPU)* Smoke-test forecast via `AxiomPredictor`: **`modal run infra/modal_app/smoke.py`** (T4, works from the laptop) or CPU locally (slow, fine) or the XTX; output saved to `research/day1/`
+- [x] **P0-06** `axiom_model` compat layer: `AxiomTokenizer/Axiom/AxiomPredictor` subclasses; `registry.py` with `axiom-zero-{mini,small,base}` → `NeoQuasar/Kronos-*`
+- [x] **P0-07** *(GPU)* Smoke-test forecast via `AxiomPredictor`: **`modal run infra/modal_app/smoke.py`** (T4, works from the laptop) or CPU locally (slow, fine) or the XTX; output saved to `research/day1/`
 - [x] **P0-08** `modal setup`; hello-GPU function on T4 prints device name
-- [ ] **P0-09** Modal volumes `axiom-data`, `axiom-ckpts` created; secrets `wandb`, `postgres` created (placeholders OK)
+- [x] **P0-09** Modal volumes `axiom-data`, `axiom-ckpts` created; secrets `wandb`, `postgres` created (placeholders OK)
 - [x] **P0-10** GitHub repo + Actions CI green (`ruff` + `pytest`)
 - [ ] **P0-11** W&B project `axiom` created; one test run logged
 - [x] **P0-12** `AXIOM_BUILD_ORDER.md` moved into `docs/`; linked from README
