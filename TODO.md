@@ -22,7 +22,7 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 - [x] **P0-08** `modal setup`; hello-GPU function on T4 prints device name
 - [x] **P0-09** Modal volumes `axiom-data`, `axiom-ckpts` created; secrets `wandb`, `postgres` created (placeholders OK)
 - [x] **P0-10** GitHub repo + Actions CI green (`ruff` + `pytest`)
-- [ ] **P0-11** W&B project `axiom` created; one test run logged
+- [x] **P0-11** W&B project `axiom` created; one test run logged
 - [x] **P0-12** `AXIOM_BUILD_ORDER.md` moved into `docs/`; linked from README
 - [ ] **GATE P0 ✅** forecast runs (CPU **or** Modal GPU) · Modal GPU works · CI green · NOTICE in place
 

@@ -105,13 +105,13 @@ data/               local only, gitignored
 
 ## Current status
 
-- **Phase: 0 — Bootstrap.** Closed: scaffold, CPU torch, Kronos subtree, NOTICE/LICENSE,
+- **Phase: 0 — Bootstrap: complete.** Scaffold, CPU torch, Kronos subtree, NOTICE/LICENSE,
   `axiom_model` compat layer + registry, forecast smoke via `AxiomPredictor` on Modal T4
-  **and** local CPU, Modal volumes/secrets, GitHub repo + CI green. (Update this line as
-  gates close; details in `TODO.md`.)
-- Open: **P0-11** W&B project + one test run (blocked on a `WANDB_API_KEY` on this machine),
-  and **P0-01** the ROCm/XTX box (optional, off the critical path). Next phase gate is P1 —
-  the data foundation.
+  **and** local CPU, Modal volumes/secrets, public GitHub repo with CI green, W&B project
+  `axiom` logging. Phase 0 gate met. (Update this line as gates close; details in `TODO.md`.)
+- Only P0-01 stays open — the ROCm/XTX box, optional and off the critical path.
+- Next: **Phase 1 — data foundation.** Gate: `axiom-data build` reproducibly emits
+  train/val/test with a printed dataset hash, clean QA report, corpus on the Modal volume.
 
 ## When unsure
 
