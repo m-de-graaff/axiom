@@ -18,4 +18,8 @@ stage_b_predictor:
   lr: TODO
   batch_size: TODO
 log:
+  # Signup-default team name. Ugly but the only entity that exists; there is no
+  # personal `mark_degraaff` entity (writes fail with "entity not found").
+  # Pinned so runs never depend on whatever W&B picks as default.
+  wandb_entity: mark_degraaff-not-applicable
   wandb_project: axiom
