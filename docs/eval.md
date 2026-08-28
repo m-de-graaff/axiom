@@ -12,6 +12,12 @@ uv run axiom-eval run --config configs/eval/default.yaml \
 modal run infra/modal_app/eval.py                                  # the second machine
 ```
 
+The Modal app shards the grid one container per (model, timeframe) and assembles the
+report from the concatenated panels. Same GPU-seconds, roughly 9x less wall clock;
+per-window seeding is what makes it safe — how the work is split cannot change a
+number. For scale: 8 windows of `axiom-zero-small` take ~1860 s on a laptop CPU and
+~11 s on an L4. Use the laptop to test plumbing, not to produce numbers.
+
 Output lands in `reports/{run_id}/`: `report.html`, `metrics.json`, `panel.parquet`,
 and copies of both configs. `run_id` is `{utc}-{config}-{git sha}`.
 
