@@ -265,3 +265,26 @@ def test_run_writes_a_report_and_a_panel(corpus):
     assert (panel["q_lo"] <= panel["q_hi"]).all()
     assert set(out["table"].columns) >= {"rankic", "dir_acc_cost", "mae_logret",
                                          "coverage_10_90", "pit_ks", "tw_n_trades"}
+
+
+def test_model_forecaster_returns_log_returns_from_the_last_context_close(corpus):
+    """The Axiom path with a tiny random-weight model: no weights, no network, no GPU.
+
+    Real weights are exercised by the Modal smoke test; what matters here is the
+    plumbing around the model — context-only normalization, denormalization, and
+    log returns measured from the anchor's close.
+    """
+    from axiom_eval.forecasters import AxiomForecaster
+    from conftest import tiny_predictor
+
+    eval_config, _, root, _ = corpus
+    cfg, _, found = sections(eval_config, root)
+    _, windows = found[0]
+    fc = AxiomForecaster("axiom-zero-tiny", cfg, predictor=tiny_predictor())
+
+    a = fc.forecast(windows[:2], HORIZONS, 4, cfg.seed)
+    b = fc.forecast(windows[:2], HORIZONS, 4, cfg.seed)
+    assert a.shape == (2, 4, len(HORIZONS))
+    assert np.isfinite(a).all()
+    assert np.array_equal(a, b), "per-window seeding is not reproducible"
+    assert np.abs(a).max() < 50, "returns are not on a log-return scale"

@@ -12,24 +12,14 @@ MC moment tolerance across CPU/CUDA/ROCm.
 import numpy as np
 import pytest
 import torch
-from axiom_model._kronos import Kronos, KronosPredictor, KronosTokenizer
+from conftest import tiny_predictor
 
 CONTEXT, PRED_LEN, SAMPLES = 12, 3, 4
 
 
 @pytest.fixture
 def predictor():
-    tokenizer = KronosTokenizer(
-        d_in=6, d_model=16, n_heads=2, ff_dim=32, n_enc_layers=1, n_dec_layers=1,
-        ffn_dropout_p=0.0, attn_dropout_p=0.0, resid_dropout_p=0.0,
-        s1_bits=4, s2_bits=4, beta=0.0, gamma0=1.0, gamma=1.0, zeta=1.0, group_size=2,
-    )
-    model = Kronos(
-        s1_bits=4, s2_bits=4, n_layers=1, d_model=16, n_heads=2, ff_dim=32,
-        ffn_dropout_p=0.0, attn_dropout_p=0.0, resid_dropout_p=0.0, token_dropout_p=0.0,
-        learn_te=True,
-    )
-    return KronosPredictor(model.eval(), tokenizer.eval(), device="cpu", max_context=16)
+    return tiny_predictor()
 
 
 @pytest.fixture
