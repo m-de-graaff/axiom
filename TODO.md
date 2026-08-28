@@ -13,17 +13,17 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 ## Phase 0 — Bootstrap (Days 1–2)
 
 - [ ] **P0-01** *(XTX box, optional — whenever you're at that machine)* Ubuntu 24.04 (native or WSL2) + ROCm installed; `rocminfo | grep gfx` shows `gfx1100`
-- [ ] **P0-02** `uv` venv (3.11) + torch installed **for this machine** (CPU wheel on laptop, ROCm wheel on XTX box); `import torch` OK; versions recorded in `docs/rocm-notes.md`
-- [ ] **P0-03** `scaffold.sh` run in empty folder; `git init`; first commit
-- [ ] **P0-04** Vendor Kronos: `git subtree add --prefix vendor/kronos https://github.com/shiyu-coder/Kronos master --squash`
-- [ ] **P0-05** Verify `NOTICE` (MIT attribution + citation) and `LICENSE` present
+- [x] **P0-02** `uv` venv (3.11) + torch installed **for this machine** (CPU wheel on laptop, ROCm wheel on XTX box); `import torch` OK; versions recorded in `docs/rocm-notes.md`
+- [x] **P0-03** `scaffold.sh` run in empty folder; `git init`; first commit
+- [x] **P0-04** Vendor Kronos: `git subtree add --prefix vendor/kronos https://github.com/shiyu-coder/Kronos master --squash`
+- [x] **P0-05** Verify `NOTICE` (MIT attribution + citation) and `LICENSE` present
 - [ ] **P0-06** `axiom_model` compat layer: `AxiomTokenizer/Axiom/AxiomPredictor` subclasses; `registry.py` with `axiom-zero-{mini,small,base}` → `NeoQuasar/Kronos-*`
 - [ ] **P0-07** *(GPU)* Smoke-test forecast via `AxiomPredictor`: **`modal run infra/modal_app/smoke.py`** (T4, works from the laptop) or CPU locally (slow, fine) or the XTX; output saved to `research/day1/`
-- [ ] **P0-08** `modal setup`; hello-GPU function on T4 prints device name
+- [x] **P0-08** `modal setup`; hello-GPU function on T4 prints device name
 - [ ] **P0-09** Modal volumes `axiom-data`, `axiom-ckpts` created; secrets `wandb`, `postgres` created (placeholders OK)
 - [ ] **P0-10** GitHub repo + Actions CI green (`ruff` + `pytest`)
 - [ ] **P0-11** W&B project `axiom` created; one test run logged
-- [ ] **P0-12** `AXIOM_BUILD_ORDER.md` moved into `docs/`; linked from README
+- [x] **P0-12** `AXIOM_BUILD_ORDER.md` moved into `docs/`; linked from README
 - [ ] **GATE P0 ✅** forecast runs (CPU **or** Modal GPU) · Modal GPU works · CI green · NOTICE in place
 
 ## Phase 1 — Data Foundation (Days 3–7) — *all CPU/laptop-friendly*

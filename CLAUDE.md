@@ -105,8 +105,8 @@ data/               local only, gitignored
 
 ## Current status
 
-- **Phase: 0 — Bootstrap.** (Update this line as gates close; details in `TODO.md`.)
-- Next gate: forecast runs (CPU locally **or** via `modal run infra/modal_app/smoke.py`); Modal hello-GPU; CI green; NOTICE in place.
+- **Phase: 0 — Bootstrap.** Done: scaffold, CPU torch, Kronos subtree, NOTICE/LICENSE, Modal auth + T4 GPU smoke (upstream Kronos API, Kronos-small, forecast OK). (Update this line as gates close; details in `TODO.md`.)
+- Next gate: P0-06 `axiom_model` compat layer + registry, then re-run the smoke through `AxiomPredictor` (P0-07); Modal volumes/secrets (P0-09); GitHub Actions CI green (P0-10); W&B test run (P0-11).
 
 ## When unsure
 
