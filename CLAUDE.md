@@ -109,7 +109,8 @@ data/               local only, gitignored
   `axiom_model` compat layer + registry, forecast smoke via `AxiomPredictor` on Modal T4
   **and** local CPU, Modal volumes/secrets, public GitHub repo with CI green, W&B project
   `axiom` logging. Phase 0 gate met. (Update this line as gates close; details in `TODO.md`.)
-- Only P0-01 stays open — the ROCm/XTX box, optional and off the critical path.
+- P0-01 (ROCm/XTX box) was set up previously for another project; its torch ROCm
+  wheel version still needs recording in `docs/rocm-notes.md` from that machine.
 - Next: **Phase 1 — data foundation.** Gate: `axiom-data build` reproducibly emits
   train/val/test with a printed dataset hash, clean QA report, corpus on the Modal volume.
 

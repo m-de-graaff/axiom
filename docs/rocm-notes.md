@@ -11,7 +11,7 @@ no CUDA-only deps, keep --no-compile working, never assume a local GPU).
 |---|---|---|---|
 | Laptop (Windows 11) | CPU | `uv pip install torch --index-url https://download.pytorch.org/whl/cpu` | 2.13.0+cpu |
 | Modal (T4/L4/A10G/A100) | CUDA | baked into the Modal image (`pip_install("torch")`) | 2.13.0 (cu13) |
-| XTX box | ROCm | not yet set up | — |
+| XTX box | ROCm | set up previously for another project | to record from that machine |
 
 ## Incidents
 

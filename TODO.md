@@ -12,7 +12,7 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 
 ## Phase 0 — Bootstrap (Days 1–2)
 
-- [ ] **P0-01** *(XTX box, optional — whenever you're at that machine)* Ubuntu 24.04 (native or WSL2) + ROCm installed; `rocminfo | grep gfx` shows `gfx1100`
+- [x] **P0-01** *(XTX box, optional — whenever you're at that machine)* Ubuntu 24.04 (native or WSL2) + ROCm installed; `rocminfo | grep gfx` shows `gfx1100`
 - [x] **P0-02** `uv` venv (3.11) + torch installed **for this machine** (CPU wheel on laptop, ROCm wheel on XTX box); `import torch` OK; versions recorded in `docs/rocm-notes.md`
 - [x] **P0-03** `scaffold.sh` run in empty folder; `git init`; first commit
 - [x] **P0-04** Vendor Kronos: `git subtree add --prefix vendor/kronos https://github.com/shiyu-coder/Kronos master --squash`
