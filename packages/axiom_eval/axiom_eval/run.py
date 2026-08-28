@@ -46,12 +46,12 @@ def _dataset_hash(name: str, datasets_dir: Path) -> str:
     return json.loads(manifest.read_text(encoding="utf-8"))["dataset_hash"]
 
 
-def _environment(device: str | None) -> dict:
+def environment_info(device: str | None) -> dict:
     env = {"python": platform.python_version(), "platform": platform.platform(), "device": device}
     try:
         import torch
 
-        env["torch"] = torch.__version__
+        env["torch"] = str(torch.__version__)  # TorchVersion pickles as a torch type
         env["device"] = device or ("cuda" if torch.cuda.is_available() else "cpu")
         if torch.cuda.is_available():
             env["gpu"] = torch.cuda.get_device_name(0)
@@ -133,21 +133,47 @@ def run(
     cfg, data_cfg = load_config(config_path)
     if max_anchors is not None:
         cfg.panel["max_anchors"] = max_anchors
-    np.random.seed(cfg.seed)
+    seed_everything(cfg.seed)
+    panel = build_panel(cfg, data_cfg, root, device, models, timeframes, symbols)
+    return finalize(
+        cfg, data_cfg, panel, config_path,
+        out_dir=out_dir, datasets_dir=datasets_dir, device=device, use_wandb=use_wandb,
+    )
+
+
+def seed_everything(seed: int) -> None:
+    np.random.seed(seed)
     try:
         import torch
 
-        torch.manual_seed(cfg.seed)
+        torch.manual_seed(seed)
     except ImportError:
         pass
 
+
+def finalize(
+    cfg,
+    data_cfg,
+    panel: pd.DataFrame,
+    config_path: str | Path,
+    out_dir: Path | None = None,
+    datasets_dir: Path = DATASETS_DIR,
+    device: str | None = None,
+    use_wandb: bool | None = None,
+    environment: dict | None = None,
+) -> dict:
+    """Panel in, `reports/{run_id}/` out.
+
+    Split out from `run` so a sharded run (one container per model x timeframe, see
+    `infra/modal_app/eval.py`) writes exactly the same report from the concatenated
+    panel. Per-window seeding is what makes that legitimate: sharding cannot change
+    a number.
+    """
     git_sha = _git_sha()
     run_id = f"{datetime.now(UTC):%Y%m%dT%H%M%S}-{cfg.name}-{git_sha[:7]}"
     dest = Path(out_dir or cfg.report_dir) / run_id
     dest.mkdir(parents=True, exist_ok=True)
-    print(f"run {run_id}\n  writing to {dest}")
 
-    panel = build_panel(cfg, data_cfg, root, device, models, timeframes, symbols)
     cost = cfg.round_trip_cost
     headline = metrics.table(panel, cost, cfg.panel["min_symbols"],
                              cfg.strategy.get("threshold_mult", 1.0))
@@ -164,7 +190,7 @@ def run(
         "split": cfg.split,
         "round_trip_cost_bps": round(cost * 1e4, 2),
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "environment": _environment(device),
+        "environment": environment or environment_info(device),
         "eval_config": cfg.raw,
     }
 
@@ -211,4 +237,4 @@ def _log_wandb(cfg, meta: dict, headline: pd.DataFrame, dest: Path, use_wandb: b
         print(f"  wandb logging skipped: {exc}")
 
 
-__all__ = ["build_panel", "run"]
+__all__ = ["build_panel", "environment_info", "finalize", "run", "seed_everything"]
