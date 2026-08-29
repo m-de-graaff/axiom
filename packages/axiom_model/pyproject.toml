@@ -3,7 +3,16 @@ name = "axiom-model"
 version = "0.0.1"
 description = "Axiom model package"
 requires-python = ">=3.11"
-dependencies = ["numpy", "einops", "huggingface_hub", "safetensors", "pyyaml", "pandas", "tqdm"]
+# torch is NOT here (see CLAUDE.md) — installed per machine. axiom-data provides
+# the segment index + normalization the training loops consume; wandb is a real
+# dependency of training (golden rule 1: an untracked run didn't happen).
+dependencies = [
+  "numpy", "einops", "huggingface_hub", "safetensors", "pyyaml", "pandas", "tqdm",
+  "axiom-data", "wandb",
+]
+
+[project.scripts]
+axiom-train = "axiom_model.train.cli:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,25 +1,64 @@
-# First fine-tune run (P3). Start from upstream finetune_csv defaults; after run 1,
-# change exactly ONE thing per run. TODO fields are filled from vendor/kronos configs.
-run_name: axiom-ft-102m-crypto1-512-v0
+# First fine-tune run (P3-03/P3-04). Hyperparameters are upstream finetune_csv
+# defaults (vendor/kronos/finetune_csv/configs + config_loader.py, cross-checked
+# against finetune/config.py) — run 1 must be attributable to the data, not to a
+# retuned recipe. After run 1, change exactly ONE value per run, one YAML per run.
+#
+# Init is `axiom-zero-small`, not `base`: the zero-shot grid shows small beating
+# base nearly everywhere (docs/results/p2-zero-shot.md), and the Phase 3 target
+# cell is 1h from small (TODO.md P3-01). Horizon within 1h is settled by P3-00d
+# on val; horizon_bars below is the *training* window tail and matches the eval
+# geometry (488 + 24 = 512 = trained context), not the signal horizon choice.
+run_name: axiom-ft-25m-crypto1-512-v0
 seed: 1337
-precision: bf16
-init:
-  tokenizer: NeoQuasar/Kronos-Tokenizer-base
-  predictor: NeoQuasar/Kronos-base
+precision: bf16                # fp32 escape hatch exists; bf16 is the plan on every GPU
 data: configs/data/crypto_v1.yaml
-stage_a_tokenizer:
+
+init:
+  model: axiom-zero-small      # registry name — resolves model + tokenizer sources
+
+window:
+  timeframes: [1h]             # the Phase 3 target timeframe
+  context_bars: 488            # + horizon_bars = 512 = the trained context length,
+  horizon_bars: 24             # identical to what the eval harness feeds (docs/eval.md)
+
+# Rule 3: 'test' is rejected outright here. `select` drives early stopping /
+# best-checkpoint choice. Selecting on val means val-scored comparisons carry a
+# mild epoch-selection tilt (noted in reports); the honest alternative — a
+# train-tail holdout — is the fallback if that tilt ever matters. The M1 verdict
+# on test is unaffected: selecting on val is legitimate against test.
+splits:
+  fit: train
+  select: val
+
+loader:
+  batch_size: 32               # upstream finetune_csv template
+  num_workers: 4
+  train_samples_per_epoch: 64000   # qlib pipeline's n_train_iter = 2000 * batch_size
+  val_samples: 12800               # n_val_iter = 400 * batch_size
+
+stage_a:
   enabled: true
-  epochs: TODO        # copy upstream default
-  lr: TODO
-  batch_size: TODO
-stage_b_predictor:
+  epochs: 30                   # upstream tokenizer_epochs
+  lr: 2.0e-4                   # upstream tokenizer_learning_rate (both pipelines)
+  weight_decay: 0.1
+  grad_clip: 2.0               # upstream max_norm for the tokenizer stage
+  accumulation_steps: 1
+
+stage_b:
   enabled: true
-  epochs: TODO
-  lr: TODO
-  batch_size: TODO
-log:
+  epochs: 20                   # upstream basemodel_epochs (csv template)
+  lr: 4.0e-5                   # upstream predictor_learning_rate default (both pipelines)
+  betas: [0.9, 0.95]
+  weight_decay: 0.1
+  grad_clip: 3.0               # upstream max_norm for the predictor stage
+  tokenizer: stage_a           # consume Stage A's output; 'init' opts out explicitly
+
+log_interval: 50
+out_dir: data/checkpoints      # gitignored locally; Modal overrides to the ckpts volume
+
+wandb:
+  enabled: true
+  project: axiom
   # Signup-default team name. Ugly but the only entity that exists; there is no
   # personal `mark_degraaff` entity (writes fail with "entity not found").
-  # Pinned so runs never depend on whatever W&B picks as default.
-  wandb_entity: mark_degraaff-not-applicable
-  wandb_project: axiom
+  entity: mark_degraaff-not-applicable

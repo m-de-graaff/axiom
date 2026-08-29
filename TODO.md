@@ -109,7 +109,16 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
       target cell picked: **1h bars, starting from `axiom-zero-small`** — `small` beats `base`
       almost everywhere (`docs/results/p2-zero-shot.md`). The **horizon is unsettled**: the 24-bar
       pick came from 60 anchors and did not hold up at 240 (P3-00b). P3-00d settles it on val
-- [ ] **P3-02** Port `finetune_csv` → `axiom_model/train/` with config-driven entrypoint *(pure code — laptop OK)*
+- [x] **P3-02** Port `finetune_csv` → `axiom_model/train/` with config-driven entrypoint
+      (`axiom-train --config configs/finetune/crypto_v0.yaml [--stage a|b]`). Losses,
+      optimizer settings, OneCycle schedule and clipping norms are upstream's, unchanged;
+      the CSV loader and its ratio splits are replaced by the segment index (embargoed
+      chronological splits, gap-free windows) and `axiom_data.normalization` (context stats
+      only). DDP dropped — every machine through M1 is a single GPU. bf16 autocast via
+      `precision:`. `configs/finetune/crypto_v0.yaml` TODOs filled with upstream defaults,
+      init retargeted to `axiom-zero-small` per P3-01. Guards: `splits.*: test` refused,
+      window must fit `max_context`, stale manifest refused. CPU tests in
+      `tests/test_train.py`; a GPU smoke run is P3-03's first step
 - [ ] **P3-03** *(GPU: XTX overnight or Modal A10G/L4)* Stage A (tokenizer) subset fine-tune
 - [ ] **P3-04** *(GPU: XTX overnight or Modal A10G/L4)* Stage B (predictor) subset fine-tune
 - [ ] **P3-05** Modal training app (`infra/modal_app/train.py`): checkpoints to volume, resume, W&B
@@ -202,17 +211,17 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 - [ ] **B-05** Publish Axiom weights (check NeoQuasar model-card licenses first) + model card
 - [ ] **B-06** Export this TODO to GitHub Issues (`gh issue create` script) if file-based tracking stops scaling
 - [ ] **B-07** Survivorship-free universe: enumerate every symbol ever published under `data/spot/monthly/klines/` on data.binance.vision (delisted ones are still hosted) and re-select `universe_v2` from that pool. Today's candidates come from the pairs Binance lists *now*, so coins that died before today are invisible to the screen
-- [ ] **B-08** `wandb` is not declared in any `pyproject.toml`, and `_log_wandb` catches the
-      ImportError and prints `wandb logging skipped: ...`. On a machine without it, a run with
-      `wandb.enabled: true` produces **no W&B record and no failure** — a silent hole under
-      golden rule 1. Either declare the dependency or make that handler loud when the config
-      explicitly asks for W&B. Found 2026-08-29 setting up the XTX for P3-00b
+- [x] **B-08** `wandb` was undeclared and `_log_wandb` swallowed the ImportError — a run with
+      `wandb.enabled: true` could produce no W&B record and no failure. Fixed with all three:
+      `wandb` declared (axiom-eval and axiom-model), `run()` preflight-imports it when the
+      config asks for W&B (fails in seconds, not after the multi-hour panel build), and the
+      end-of-run handler prints a loud stderr banner instead of a footnote — kept non-fatal
+      because the report is already on disk by then
 - [ ] **B-09** `parity_and_speed` (`axiom_eval/bench.py`) has no discarded warmup run, so
       whichever model is timed first absorbs kernel-load cost and reports a bogus speedup —
       on the XTX, `small` first reads 0.5x, `base` first reads 7.5x for the same model.
       Parity/`token_identical` is unaffected; only timings. Fixing it invalidates the committed
       L4 `small` row (1.2x) until that is re-run, so do both together (`docs/rocm-notes.md`)
-- [ ] **B-10** `build_panel` prints one line per forecaster only on completion, so a multi-hour
-      run redirected to a file shows nothing at all (Python block-buffers stdout). P3-00b was
-      97 minutes with zero progress output — health had to be checked via `amd-smi`. Add
-      `flush=True` or run under `python -u`, and consider a per-anchor counter
+- [x] **B-10** `build_panel` printed only on forecaster completion and Python block-buffers
+      to a file, so P3-00b ran 97 minutes with zero progress output. Now prints a flushed
+      line every 10 anchors plus the flushed completion line; confirmed live during P3-00d

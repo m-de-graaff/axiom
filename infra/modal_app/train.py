@@ -31,8 +31,22 @@ ckpt_vol = modal.Volume.from_name("axiom-ckpts", create_if_missing=True)
 )
 def train(config_yaml: str):
     import sys
+    import tempfile
+    from pathlib import Path
 
     sys.path.insert(0, "/root/packages/axiom_model")
-    # TODO P3-05: from axiom_model.train.finetune import run
-    # run(config_yaml, data_root="/data", ckpt_root="/ckpts")
-    raise NotImplementedError("P3-05: wire axiom_model.train.finetune.run")
+    sys.path.insert(0, "/root/packages/axiom_data")
+    from axiom_model.train.finetune import run
+
+    # The config references configs/data/*.yaml relatively; P3-05 decides whether
+    # to ship configs/ into the image or inline them. Until then this entrypoint
+    # expects the YAML to resolve against the volume layout below.
+    cfg = Path(tempfile.mkdtemp()) / "finetune.yaml"
+    cfg.write_text(config_yaml, encoding="utf-8")
+    run(
+        cfg,
+        root=Path("/data/parquet"),
+        datasets_dir=Path("/data/datasets"),
+        out_dir=Path("/ckpts"),
+    )
+    ckpt_vol.commit()
