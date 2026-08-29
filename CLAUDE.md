@@ -148,12 +148,17 @@ data/               local only, gitignored
   pairs Binance lists today). Delisted-mid-history symbols are absent; `XMRUSDT` and
   `WAVESUSDT` were delisted during the test window and contribute no test windows.
   Reports must say so.
-- Next: **Phase 3 — fine-tune**, target cell 1h × 24 bars from `axiom-zero-small`. P3-00a (ROCm
-  parity leg) and P3-00c (`configs/eval/val.yaml` — all Phase 3 iteration runs on **val**; test
-  is reserved for the M1 verdict) are done. **P3-00b is the one still open**: re-run the winning
-  cell on test with 240 anchors (`modal run infra/modal_app/eval.py --timeframes 1h
-  --max-anchors 240 --chunks 8`, ~$3) before committing to a fine-tune — t=2.56 rests on 60
-  cross-sections.
+- **P3-00a/b/c are done; the Phase 3 target cell is now 1h from `axiom-zero-small` with the
+  horizon unsettled.** P3-00b re-ran the winning cell at 240 anchors on the XTX (run
+  `20260829T151050-default-d309bd8`, W&B `f6age13x`,
+  `docs/results/p3-00b-anchor-recheck.md`): the rank signal survives and strengthens
+  (1h/24 t=2.56 → 3.45, all three 1h horizons t>3, baselines still negative), but **1h/24
+  turned out to be the weakest 1h horizon** (RankIC 0.068 → 0.043, ordering 12 > 6 > 24) and
+  its post-cost tripwire reversed from +40.5 to −16.3 bps. Retargeting on those numbers would
+  be selection on test, so **P3-00d settles the horizon on `configs/eval/val.yaml` first**.
+  Calibration is unchanged and still broken (coverage 0.33–0.47 vs 0.80 nominal).
+- Next after that: **Phase 3 — fine-tune** (P3-02 onward). All Phase 3 iteration runs on
+  **val**; test is reserved for the M1 verdict.
 
 ## When unsure
 

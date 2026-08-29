@@ -38,6 +38,12 @@ is a prerequisite for the signal service, not a nice-to-have.
 bars at 1h. 15m is noise for everyone. 4h has the best tripwire numbers but the weakest
 t-stats, which is what 60 cross-sections of 4h bars buys you.
 
+> **Superseded (2026-08-29, P3-00b).** The monotonic 6 → 24 claim does not hold at 240
+> anchors: the ordering inverts to 12 > 6 > 24, and the 1h/24 economics reverse sign.
+> The rank signal itself survives and strengthens. See
+> [p3-00b-anchor-recheck.md](p3-00b-anchor-recheck.md) before using any number in the
+> 1h tables below to choose a target cell.
+
 ## Full grid
 
 **15m, horizon 6 bars**
@@ -151,7 +157,10 @@ t-stats, which is what 60 cross-sections of 4h bars buys you.
   per-trade Sharpe optimistic about overlapping trades. Phase 8 does this properly.
 - **60 cross-sections is thin.** A t-stat of 2.56 on 60 points is suggestive, not
   established. The first thing P3-01 should do is re-run the winning cell with more
-  anchors before fine-tuning toward it.
+  anchors before fine-tuning toward it. **Done (P3-00b, 2026-08-29):** at 240 anchors the
+  signal survives (t = 3.45) but RankIC falls to 0.043 and 1h/24 turns out to be the
+  *weakest* 1h horizon, with its post-cost edge reversing sign. See
+  [p3-00b-anchor-recheck.md](p3-00b-anchor-recheck.md).
 
 ## Cross-machine reproduction (P2-13)
 

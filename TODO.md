@@ -83,9 +83,14 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
       five new incidents in `docs/rocm-notes.md`. Unblocks `axiom-runtime-*` tags.
       Found on the way: `parity_and_speed` has no warmup run, so the first model timed
       reports a bogus speedup — parity unaffected, timings need one sig fig until fixed
-- [ ] **P3-00b** Re-run the winning cell with more anchors before trusting it:
-      `modal run infra/modal_app/eval.py --timeframes 1h --max-anchors 240 --chunks 8` (~$3).
-      t=2.56 rests on 60 cross-sections; if it survives 240, fine-tune toward it
+- [x] **P3-00b** Re-run the winning cell with more anchors before trusting it — done on the
+      **XTX** (ROCm, ~1.7h) rather than Modal; run `20260829T151050-default-d309bd8`, W&B
+      `f6age13x`, writeup `docs/results/p3-00b-anchor-recheck.md`. The signal survives: 1h/24
+      goes t=2.56 -> **t=3.45** on 240 cross-sections, with all three 1h horizons clearing t>3
+      and the baselines still negative. **But the target cell is now in question** — RankIC at
+      24 bars fell 0.068 -> 0.043, making it the weakest 1h horizon (12 > 6 > 24), and its
+      post-cost tripwire reversed from +40.5 to -16.3 bps. Do NOT retarget on those numbers:
+      they are the best of three *on test*. Pick the horizon on val first (see below)
 - [x] **P3-00c** **Iterate on `val` from here on.** `configs/eval/val.yaml` added;
       `default.yaml` stays frozen for the M1 verdict. It is not just `split: val` —
       `lightgbm.fit_splits` drops to `[train]`, since `default.yaml` fits on `[train, val]`,
@@ -93,10 +98,17 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
       the eval split appears in `fit_splits` (test in `tests/test_eval.py`). Noted in the
       config: at 4h, 488 context bars eat 81 of val's 167 days, so only ~11 anchors are
       available there — 15m and 1h still hit the 60 cap, including the target cell
+- [ ] **P3-00d** *(GPU, ~1.7h on the XTX)* **Settle the horizon on val before fine-tuning.**
+      P3-00b showed 1h/24 is the weakest of the three 1h horizons on test (12 > 6 > 24) and
+      that its post-cost edge reverses, but choosing a cell because it won on test is
+      selection on test. Run `axiom-eval run --config configs/eval/val.yaml --timeframes 1h
+      --models axiom-zero-small persistence ewma lightgbm` and pick the horizon there.
+      Then update P3-01's target cell to whatever val says
 
 - [x] **P3-01** *(GPU)* Zero-shot grid: {mini, small, base} × {15m, 1h, 4h} × horizons {6, 12, 24};
-      target cell picked: **1h × 24 bars, starting from `axiom-zero-small`** — the only cell with
-      RankIC t > 2, and `small` beats `base` almost everywhere (`docs/results/p2-zero-shot.md`)
+      target cell picked: **1h bars, starting from `axiom-zero-small`** — `small` beats `base`
+      almost everywhere (`docs/results/p2-zero-shot.md`). The **horizon is unsettled**: the 24-bar
+      pick came from 60 anchors and did not hold up at 240 (P3-00b). P3-00d settles it on val
 - [ ] **P3-02** Port `finetune_csv` → `axiom_model/train/` with config-driven entrypoint *(pure code — laptop OK)*
 - [ ] **P3-03** *(GPU: XTX overnight or Modal A10G/L4)* Stage A (tokenizer) subset fine-tune
 - [ ] **P3-04** *(GPU: XTX overnight or Modal A10G/L4)* Stage B (predictor) subset fine-tune

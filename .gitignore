@@ -16,3 +16,6 @@ dist/
 
 # scratch artifacts from machine-specific checks (numbers live in docs/)
 research/
+
+# local scratch (logs, symbol lists, generated tables)
+.scratch/
