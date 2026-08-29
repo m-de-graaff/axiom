@@ -127,7 +127,12 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
       `tests/test_train.py`; a GPU smoke run is P3-03's first step
 - [ ] **P3-03** *(GPU: XTX overnight or Modal A10G/L4)* Stage A (tokenizer) subset fine-tune
 - [ ] **P3-04** *(GPU: XTX overnight or Modal A10G/L4)* Stage B (predictor) subset fine-tune
-- [ ] **P3-05** Modal training app (`infra/modal_app/train.py`): checkpoints to volume, resume, W&B
+- [~] **P3-05** Modal training app (`infra/modal_app/train.py`): checkpoints to volume, resume, W&B.
+      **Verified end-to-end 2026-08-29 on an L4** (smoke: both stages on the volume corpus —
+      1,474,084 train windows — bf16, checkpoints committed to `axiom-ckpts` under
+      `axiom-ft-smoke/`, ~$0.20). GPU via `AXIOM_TRAIN_GPU` env (default A100-80GB per
+      policy; set `L4`/`A10G` for subset runs). Still owed: **resume from checkpoint** and
+      one W&B-enabled run on Modal (secret is attached; smoke ran with wandb off)
 - [ ] **P3-06** Full-corpus Stage A on A100-80GB
 - [ ] **P3-07** Full-corpus Stage B on A100-80GB → `axiom-ft-102m-crypto1-512-v0`
 - [ ] **P3-08** Harness eval: comparison table vs zero-shot + all baselines, committed to `reports/`
