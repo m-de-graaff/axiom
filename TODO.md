@@ -86,9 +86,13 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 - [ ] **P3-00b** Re-run the winning cell with more anchors before trusting it:
       `modal run infra/modal_app/eval.py --timeframes 1h --max-anchors 240 --chunks 8` (~$3).
       t=2.56 rests on 60 cross-sections; if it survives 240, fine-tune toward it
-- [ ] **P3-00c** **Iterate on `val` from here on.** The test split has been looked at once
-      (`docs/results/p2-zero-shot.md`); every further look costs honesty. Set `split: val` in a
-      `configs/eval/val.yaml` copy and keep `default.yaml` for the M1 verdict only
+- [x] **P3-00c** **Iterate on `val` from here on.** `configs/eval/val.yaml` added;
+      `default.yaml` stays frozen for the M1 verdict. It is not just `split: val` —
+      `lightgbm.fit_splits` drops to `[train]`, since `default.yaml` fits on `[train, val]`,
+      which is correct against test and leakage against val. `load_config()` now raises when
+      the eval split appears in `fit_splits` (test in `tests/test_eval.py`). Noted in the
+      config: at 4h, 488 context bars eat 81 of val's 167 days, so only ~11 anchors are
+      available there — 15m and 1h still hit the 60 cap, including the target cell
 
 - [x] **P3-01** *(GPU)* Zero-shot grid: {mini, small, base} × {15m, 1h, 4h} × horizons {6, 12, 24};
       target cell picked: **1h × 24 bars, starting from `axiom-zero-small`** — the only cell with

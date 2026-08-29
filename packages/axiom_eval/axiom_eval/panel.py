@@ -92,6 +92,13 @@ def load_config(path: str | Path) -> tuple[EvalConfig, datasets.DataConfig]:
     missing = set(cfg.horizons) - set(data_cfg.horizons)
     if missing:
         raise ValueError(f"eval horizons {sorted(missing)} not in {cfg.data}: {data_cfg.horizons}")
+    # A baseline fitted on the split it is scored against is not a baseline. Easy to do
+    # by copying an eval config and changing only `split` (P3-00c), so it is an assert.
+    if cfg.split in cfg.lightgbm.get("fit_splits", []):
+        raise ValueError(
+            f"{cfg.data}: lightgbm.fit_splits {cfg.lightgbm['fit_splits']} contains the eval "
+            f"split '{cfg.split}' — the baseline would be fitted on the bars it is scored on"
+        )
     return cfg, data_cfg
 
 

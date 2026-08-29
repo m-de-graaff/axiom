@@ -98,6 +98,16 @@ def sections(eval_config, root):
     return cfg, data_cfg, list(cross_sections(cfg, data_cfg, TF, bars_by_symbol))
 
 
+def test_a_baseline_may_not_be_fitted_on_the_split_it_is_scored_on(corpus):
+    """The P3-00c footgun: copy an eval config, change `split`, forget `fit_splits`."""
+    eval_config, _, _, _ = corpus
+    raw = yaml.safe_load(eval_config.read_text())
+    raw["split"] = "train"  # which fit_splits already contains
+    eval_config.write_text(yaml.safe_dump(raw))
+    with pytest.raises(ValueError, match="fitted on the bars it is scored on"):
+        load_config(eval_config)
+
+
 def test_windows_are_leak_free(corpus):
     """Context inside the split, horizon inside the split, no future bars in context."""
     eval_config, _, root, _ = corpus

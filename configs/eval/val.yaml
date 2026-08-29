@@ -1,0 +1,78 @@
+# Phase 3 iteration config (P3-00c). Identical to default.yaml except for the split
+# and the LightGBM fit splits.
+#
+# The test split has been looked at exactly once (docs/results/p2-zero-shot.md) and is
+# reserved for the M1 verdict — every further look costs honesty (CLAUDE.md rule 3).
+# So every fine-tune comparison, threshold pick, and "did that help?" question during
+# Phase 3 runs against THIS file. `default.yaml` stays frozen for the verdict.
+#
+# Numbers from this config are NOT comparable to the zero-shot grid: different split,
+# different period, and val is ~5.5 months against test's ~2 years, so cross-sections
+# are fewer and the error bars are wider. Compare val to val.
+#
+# Anchor budget on this split (167 days), at stride_bars 48 and context_bars 488:
+#   15m  ~324 available -> the 60 cap binds, same as test
+#   1h    ~73 available -> the 60 cap binds, same as test   <- the Phase 3 target cell
+#   4h    ~11 available -> the cap does NOT bind
+# 488 bars of 4h context is 81 days, roughly half of val, so 4h barely fits here. Treat
+# 4h val metrics as directional at best — ~11 anchors will not support a t-stat. If 4h
+# ever needs a real answer, it needs a longer val split, not a smaller context.
+seed: 1337
+data: configs/data/crypto_v1.yaml
+split: val
+models: [axiom-zero-mini, axiom-zero-small, axiom-zero-base]
+baselines:
+  persistence: true
+  ewma: true
+  lightgbm: true
+  chronos_bolt: false          # P2-08, optional; not implemented
+mc:
+  samples: 64
+  temperature: 1.0
+  top_p: 0.9
+  top_k: 0
+costs:                         # round-trip cost = 2 * (taker_fee + slippage)
+  taker_fee_bps: 10
+  slippage_bps: 7
+metrics: [rankic, dir_acc_cost, mae_logret, rmse_logret, coverage_10_90, pit]
+slices: [year, vol_tercile]
+report_dir: reports/
+
+panel:
+  timeframes: [15m, 1h, 4h]
+  horizons: [6, 12, 24]        # must be a subset of the data config's horizons
+  stride_bars: 48              # anchor grid spacing, in bars of the timeframe
+  max_anchors: 60              # per timeframe, evenly spaced over the split
+  min_symbols: 10              # thinner cross-sections are dropped from RankIC
+  vol_window: 96               # context bars behind the realized-vol slice
+  context_bars: 488            # 488 + 24 = 512 = the trained context; see docs/eval.md
+  band: [0.1, 0.9]             # calibration band (coverage target = 0.8)
+
+ewma:
+  halflife_bars: 24
+
+# LightGBM baseline. `train` ONLY here — default.yaml fits on [train, val], which is
+# correct when scoring test and leakage when scoring val. load_config() asserts the
+# eval split is absent from this list.
+lightgbm:
+  fit_splits: [train]
+  lags: [1, 2, 3, 6, 12, 24]
+  vol_windows: [24, 96]
+  train_stride_bars: 48
+  max_train_rows: 200000
+  num_boost_round: 300
+  params:                      # native LightGBM names (no scikit-learn in the venv)
+    learning_rate: 0.05
+    num_leaves: 31
+    min_data_in_leaf: 50
+    feature_fraction: 0.8
+    bagging_fraction: 0.8
+    bagging_freq: 1
+
+strategy:
+  threshold_mult: 1.0          # trade when pred > threshold_mult * round-trip cost
+
+wandb:
+  enabled: true
+  project: axiom
+  entity: mark_degraaff-not-applicable
