@@ -306,12 +306,29 @@ class RotaryPositionalEmbedding(nn.Module):
             self.sin_cached = emb.sin()[None, None, :, :]
         return self.cos_cached, self.sin_cached
 
-    def forward(self, q, k):
-        cos, sin = self._update_cos_sin_cache(q, q.shape[-2])
-        return (
-            (q * cos) + (self._rotate_half(q) * sin),
-            (k * cos) + (self._rotate_half(k) * sin),
-        )
+    def rotate(self, x, offset=0):
+        """AXIOM (P4-04): rotate at absolute positions [offset, offset + len).
+
+        Incremental decoding needs a token rotated at the position it actually
+        occupies, not at position 0 of whatever slice it arrives in. offset=0 is
+        upstream's behaviour.
+        """
+        length = x.shape[-2]
+        cos, sin = self._update_cos_sin_cache(x, offset + length)
+        cos = cos[:, :, offset:offset + length, :]
+        sin = sin[:, :, offset:offset + length, :]
+        return (x * cos) + (self._rotate_half(x) * sin)
+
+    def forward(self, q, k, offset=0):
+        if offset == 0:
+            # Upstream, unchanged: the table is built from q's length and broadcast
+            # over k, which matters where q and k differ in length (cross-attention).
+            cos, sin = self._update_cos_sin_cache(q, q.shape[-2])
+            return (
+                (q * cos) + (self._rotate_half(q) * sin),
+                (k * cos) + (self._rotate_half(k) * sin),
+            )
+        return self.rotate(q, offset), self.rotate(k, offset)
 
     def _rotate_half(self, x):
         x1, x2 = x.chunk(2, dim=-1)
@@ -333,14 +350,27 @@ class MultiHeadAttentionWithRoPE(nn.Module):
         self.attn_dropout_p = attn_dropout_p
         self.resid_dropout = nn.Dropout(resid_dropout_p)
 
-    def forward(self, x, key_padding_mask=None):
+    def forward(self, x, key_padding_mask=None, cache=None, offset=0):
+        """`cache` is a mutable [k, v] list this layer appends to (AXIOM, P4-04).
+
+        With a cache the new tokens are rotated at absolute positions and attend to
+        every cached key, which is exactly what the full recompute produces -- as
+        long as the window never slides, which is why `generate.cached_inference`
+        refuses contexts that would make it slide.
+        """
         batch_size, seq_len, _ = x.shape
 
         q = self.q_proj(x).view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
         k = self.k_proj(x).view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
         v = self.v_proj(x).view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
 
-        q, k = self.rotary(q, k)
+        q, k = self.rotary(q, k, offset=offset)
+
+        if cache is not None:
+            if cache:
+                k = torch.cat([cache[0], k], dim=2)
+                v = torch.cat([cache[1], v], dim=2)
+            cache[:] = [k, v]
 
         if key_padding_mask is not None:
             attn_mask = key_padding_mask.unsqueeze(1).unsqueeze(2)  # [batch, 1, 1, seq_len]
@@ -352,7 +382,7 @@ class MultiHeadAttentionWithRoPE(nn.Module):
             q, k, v,
             attn_mask=attn_mask,
             dropout_p=self.attn_dropout_p if self.training else 0.0,
-            is_causal=True
+            is_causal=attn_mask is None and q.shape[-2] == k.shape[-2] and q.shape[-2] > 1
         )
 
         attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.d_model)
@@ -455,15 +485,20 @@ class DependencyAwareLayer(nn.Module):
         self.cross_attn = MultiHeadCrossAttentionWithRoPE(d_model, n_heads, attn_dropout_p, resid_dropout)
         self.norm = RMSNorm(d_model)
 
-    def forward(self, hidden_states, sibling_embed, key_padding_mask=None):
+    def forward(self, hidden_states, sibling_embed, key_padding_mask=None, kv_states=None):
         """hidden_states: [batch, seq_len, d_model]
         sibling_embed: Embedding from another subtoken
+
+        AXIOM (P4-04): `kv_states` lets `hidden_states` be the single position being
+        decoded while the keys and values stay the whole window. Upstream passes the
+        whole window as both and keeps only the last row; this keeps that row's
+        arithmetic and drops the rest. `kv_states=None` is upstream.
         """
         attn_out = self.cross_attn(
             query=sibling_embed,
-            key=hidden_states,
-            value=hidden_states,
-            key_padding_mask=key_padding_mask
+            key=hidden_states if kv_states is None else kv_states,
+            value=hidden_states if kv_states is None else kv_states,
+            key_padding_mask=key_padding_mask,
         )
         return self.norm(hidden_states + attn_out)
 
@@ -476,10 +511,10 @@ class TransformerBlock(nn.Module):
         self.norm2 = RMSNorm(d_model)
         self.ffn = FeedForward(d_model, ff_dim, ffn_dropout_p)
 
-    def forward(self, x, key_padding_mask=None):
+    def forward(self, x, key_padding_mask=None, cache=None, offset=0):
         residual = x
         x = self.norm1(x)
-        attn_out = self.self_attn(x, key_padding_mask=key_padding_mask)
+        attn_out = self.self_attn(x, key_padding_mask=key_padding_mask, cache=cache, offset=offset)
         x = residual + attn_out
 
         residual = x

@@ -31,6 +31,11 @@ panel:
   max_anchors: 60              # per timeframe, evenly spaced over the split
   min_symbols: 10              # thinner cross-sections are dropped from RankIC
   vol_window: 96               # context bars behind the realized-vol slice
+  context_bars: 488            # <= the data config's 512, and 488 + 24 = 512 = the
+                               # trained context of axiom-zero-{small,base}. Feeding
+                               # the full 512 would make generation slide its window,
+                               # which costs ~20x (no KV cache is possible) and drops
+                               # the oldest bars anyway. See docs/eval.md.
   band: [0.1, 0.9]             # calibration band (coverage target = 0.8)
 
 # EWMA drift+vol baseline (P2-06).

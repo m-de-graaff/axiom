@@ -225,6 +225,13 @@ class AxiomForecaster:
         self.name = name
         self.cfg = cfg
         self.predictor = predictor if predictor is not None else load_predictor(name, device=device)
+        self.context_bars = cfg.panel.get("context_bars")
+        if self.context_bars and self.context_bars + cfg.max_horizon > self.predictor.max_context:
+            raise ValueError(
+                f"{name}: context {self.context_bars} + horizon {cfg.max_horizon} exceeds "
+                f"max_context {self.predictor.max_context}; generation would slide its "
+                f"window and lose the KV cache (see axiom_model.generate)"
+            )
 
     def forecast(self, windows, horizons, samples, seed) -> np.ndarray:
         import torch
@@ -234,6 +241,8 @@ class AxiomForecaster:
         out = np.empty((len(windows), samples, len(horizons)))
         for k, w in enumerate(windows):
             context = normalization.ensure_amount(w.context)
+            if self.context_bars:
+                context = context.iloc[-self.context_bars :]
             x = context[normalization.FEATURES].to_numpy(np.float32)
             mean, std = normalization.fit(x)
             x_stamp = normalization.time_features(context.ts).to_numpy(np.float32)

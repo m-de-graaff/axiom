@@ -279,7 +279,7 @@ class Kronos(nn.Module, PyTorchModelHubMixin):
         s2_logits = self.head.cond_forward(x2)
         return s1_logits, s2_logits
 
-    def decode_s1(self, s1_ids, s2_ids, stamp=None, padding_mask=None):
+    def decode_s1(self, s1_ids, s2_ids, stamp=None, padding_mask=None, caches=None, offset=0):
         """
         Decodes only the s1 tokens.
 
@@ -303,15 +303,23 @@ class Kronos(nn.Module, PyTorchModelHubMixin):
             x = x + time_embedding
         x = self.token_drop(x)
 
-        for layer in self.transformer:
-            x = layer(x, key_padding_mask=padding_mask)
+        # AXIOM (P4-04): `caches` is one mutable [k, v] list per layer; `offset` is
+        # how many positions are already in them. Both default to upstream's
+        # full-window recompute.
+        for i, layer in enumerate(self.transformer):
+            x = layer(
+                x,
+                key_padding_mask=padding_mask,
+                cache=None if caches is None else caches[i],
+                offset=offset,
+            )
 
         x = self.norm(x)
 
         s1_logits = self.head(x)
         return s1_logits, x
 
-    def decode_s2(self, context, s1_ids, padding_mask=None):
+    def decode_s2(self, context, s1_ids, padding_mask=None, kv_states=None):
         """
         Decodes the s2 tokens, conditioned on the context and s1 tokens.
 
@@ -328,7 +336,9 @@ class Kronos(nn.Module, PyTorchModelHubMixin):
             torch.Tensor: s2 logits. Shape: [batch_size, seq_len, s2_vocab_size]
         """
         sibling_embed = self.embedding.emb_s1(s1_ids)
-        x2 = self.dep_layer(context, sibling_embed, key_padding_mask=padding_mask)
+        x2 = self.dep_layer(
+            context, sibling_embed, key_padding_mask=padding_mask, kv_states=kv_states
+        )
         return self.head.cond_forward(x2)
 
 
@@ -512,14 +522,21 @@ class KronosPredictor:
         self.tokenizer = self.tokenizer.to(self.device)
         self.model = self.model.to(self.device)
 
-    def generate(self, x, x_stamp, y_stamp, pred_len, T, top_k, top_p, sample_count, verbose, reduce='mean'):
+    def generate(self, x, x_stamp, y_stamp, pred_len, T, top_k, top_p, sample_count, verbose, reduce='mean', use_cache=True):
 
         x_tensor = torch.from_numpy(np.array(x).astype(np.float32)).to(self.device)
         x_stamp_tensor = torch.from_numpy(np.array(x_stamp).astype(np.float32)).to(self.device)
         y_stamp_tensor = torch.from_numpy(np.array(y_stamp).astype(np.float32)).to(self.device)
 
-        preds = auto_regressive_inference(self.tokenizer, self.model, x_tensor, x_stamp_tensor, y_stamp_tensor, self.max_context, pred_len,
-                                          self.clip, T, top_k, top_p, sample_count, verbose, reduce)
+        # AXIOM (P4-04): the cached loop when the window fits, upstream's recompute
+        # otherwise. `use_cache=False` is the escape hatch; both are parity-tested.
+        inference = auto_regressive_inference
+        if use_cache and x_tensor.size(1) + pred_len <= self.max_context:
+            from .generate import cached_inference
+
+            inference = cached_inference
+        preds = inference(self.tokenizer, self.model, x_tensor, x_stamp_tensor, y_stamp_tensor, self.max_context, pred_len,
+                          self.clip, T, top_k, top_p, sample_count, verbose, reduce)
         preds = preds[..., -pred_len:, :]
         return preds
 
