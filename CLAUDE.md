@@ -111,16 +111,28 @@ data/               local only, gitignored
 
 ## Current status
 
-- **Phase: 2 — Eval harness: built, gate not yet met.** `axiom-eval run` scores models and the
+- **Phase: 2 — Eval harness: complete, gate met.** `axiom-eval run` scores models and the
   baseline panel (persistence, EWMA, LightGBM) on a shared, epoch-aligned anchor grid and writes
   `reports/{run_id}/` (HTML + metrics JSON + panel parquet + both configs), optionally to W&B.
   Metrics: RankIC + t-stat, cost-aware directional accuracy, MAE/RMSE on log returns, 10–90
   coverage + PIT, sliced by year and vol tercile, plus the long/flat cost tripwire. Leakage rules
-  are asserts. Spec and the three deliberate deviations from the build order (no vectorbt, no
-  LightGBM walk-forward refit, Chronos-Bolt skipped) are in `docs/eval.md`. Smoke-tested end to end
-  on the real corpus at 1h. **Still open for the gate:** the full zero-shot scoring run over
-  {mini, small, base} × {15m, 1h, 4h} (GPU) and the Modal L4 cross-machine leg (P2-13,
-  `infra/modal_app/eval.py`).
+  are asserts. Spec and the deliberate deviations from the build order (no vectorbt, no LightGBM
+  walk-forward refit, Chronos-Bolt skipped, 488 context bars) are in `docs/eval.md`.
+- **Zero-shot results are in: `docs/results/p2-zero-shot.md`.** Two findings drive the next
+  phases. (1) `axiom-zero-small` at 1h with a 24-bar horizon is the only cell with RankIC
+  t > 2 (0.068, t=2.56), beating LightGBM (0.005) and the naive baselines (−0.083); the 102M
+  `base` is *worse* than the 24.7M `small` nearly everywhere, so parameters are not the
+  constraint. (2) **The MC fan is badly miscalibrated** — 10–90 coverage 0.19–0.47 against a
+  nominal 0.80, PIT KS up to 0.44. Phase 6 turns these paths into `p_up`; on these numbers that
+  probability is fiction. Fix calibration before the signal service ships.
+- **P4-02 and P4-04 were pulled forward into Phase 2.** The decode loop had no KV cache — every
+  step re-ran a full forward over the whole window — which made the zero-shot grid a ~$60 Modal
+  bill. `axiom_model/generate.py` adds a per-layer cache: 9.1x on `axiom-zero-base` (L4, 64
+  samples, 24 steps: 25.8s → 2.8s), token-identical to upstream. It is only valid when the window
+  does not slide, so the eval feeds 488 context bars (488 + 24 = the trained 512).
+  `tests/test_parity.py` is the real harness now (CPU in CI, CUDA via
+  `modal run infra/modal_app/parity.py`); the **ROCm leg is still owed** before any
+  `axiom-runtime-*` tag.
 - **Phase: 1 — Data foundation: complete.** 50-symbol Binance USDT universe frozen in
   `configs/universe_v1.yaml`, selected on train-period median daily volume (not a live
   snapshot) with a continuity screen; 1m spot history downloaded and CHECKSUM-verified,
@@ -134,8 +146,9 @@ data/               local only, gitignored
   pairs Binance lists today). Delisted-mid-history symbols are absent; `XMRUSDT` and
   `WAVESUSDT` were delisted during the test window and contribute no test windows.
   Reports must say so.
-- Next: close the **P2 gate** (run the harness on Modal for the zero-shot grid + the
-  cross-machine comparison), then **Phase 3 — zero-shot baseline & first fine-tune**.
+- Next: **Phase 3 — fine-tune.** P3-01's cell picking is largely done by the zero-shot grid
+  (1h, 24 bars, starting from `axiom-zero-small` rather than `base`); re-run that cell with more
+  anchors before trusting it, since t=2.56 rests on 60 cross-sections.
 
 ## When unsure
 

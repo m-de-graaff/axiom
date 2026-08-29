@@ -4,7 +4,7 @@
 
 Axiom fine-tunes and extends [Kronos](https://github.com/shiyu-coder/Kronos) (Shi et al. 2025, MIT — see `NOTICE`) for crypto K-line forecasting, converts Monte-Carlo forecast paths into calibrated bull/bear probabilities, and serves them to a dashboard and a risk-gated trading loop. Built by one person; engineered like it will eventually route real money — because it might.
 
-> **Status:** Phase 2 — Eval harness · see [`TODO.md`](TODO.md) · plan: [`docs/AXIOM_BUILD_ORDER.md`](docs/AXIOM_BUILD_ORDER.md) · rules: [`CLAUDE.md`](CLAUDE.md)
+> **Status:** Phase 3 — Fine-tune · see [`TODO.md`](TODO.md) · plan: [`docs/AXIOM_BUILD_ORDER.md`](docs/AXIOM_BUILD_ORDER.md) · rules: [`CLAUDE.md`](CLAUDE.md)
 
 ## Architecture
 
@@ -122,6 +122,14 @@ modal run infra/modal_app/eval.py                                 # the same run
   split, no window across a data gap, context-only normalization, ex-ante universe.
 - Every run is reproducible from a committed YAML + git SHA + dataset hash, seeded per window
   so results don't depend on evaluation order or sharding.
+
+First results are in [`docs/results/p2-zero-shot.md`](docs/results/p2-zero-shot.md): zero-shot
+`axiom-zero-small` at 1h / 24 bars is the only cell in the grid with a RankIC t-stat above 2
+(0.068, t = 2.56), ahead of LightGBM (0.005) and well ahead of persistence and EWMA (−0.083),
+and the 102M model is worse than the 24.7M one nearly everywhere. The Monte-Carlo fan, however,
+is badly miscalibrated — 10–90 coverage of 0.19–0.47 against a nominal 0.80 — so the probability
+layer in Phase 6 is blocked until that is fixed. Both facts exist because the harness was built
+before the model work, which is the entire point of building it first.
 
 ## Benchmarks
 

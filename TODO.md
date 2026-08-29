@@ -63,11 +63,15 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 - [x] **P2-11** Leakage checklist enforced as asserts (no future bars, embargo, context-only normalization, ex-ante universe)
 - [x] **P2-12** Determinism: per-window seeds derived from `sha256(seed|model|symbol|tf|anchor)`,
       so results don't depend on evaluation order or sharding; `mc_samples=64`, `T=1.0`, `top_p=0.9`
-- [~] **P2-13** Cross-machine reproduction: `infra/modal_app/eval.py` written and the local CPU
-      leg is green; the Modal L4 leg still has to be *run* and the two reports compared
-- [ ] **GATE P2** zero-shot `axiom-zero-*` + all baselines evaluated · reproduces on 2 machines · report auto-generated
-      — harness done and smoke-tested end to end on the real corpus (baselines + `axiom-zero-small`,
-      1h); the full scoring run over {mini, small, base} × {15m, 1h, 4h} is a GPU job, not a laptop one
+- [x] **P2-13** Cross-machine reproduction: baseline legs on Modal L4 (Linux) and the laptop
+      (Windows CPU) give identical keys over 73,971 rows, max deviation 9e-16, bit-identical PIT
+- [x] **GATE P2 ✅** {mini, small, base} × {15m, 1h, 4h} × horizons {6, 12, 24} + all baselines
+      scored on the test split · reproduces on two machines · report auto-generated. Numbers and
+      the honest reading: `docs/results/p2-zero-shot.md`. Headline: `axiom-zero-small` at 1h/24
+      bars is the only cell with RankIC t > 2 (0.068, t=2.56) and it beats LightGBM (0.005) and
+      the naive baselines (-0.083); `axiom-zero-base` is worse than `small` almost everywhere.
+      **The MC fan is badly miscalibrated** — 10–90 coverage 0.19–0.47 against a nominal 0.80 —
+      which blocks Phase 6's `p_up` until it is fixed
 
 ## Phase 3 — Zero-Shot Baseline & Fine-Tune → **M1** (Weeks 2–3)
 
