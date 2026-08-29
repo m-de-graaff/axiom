@@ -227,11 +227,11 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
       config asks for W&B (fails in seconds, not after the multi-hour panel build), and the
       end-of-run handler prints a loud stderr banner instead of a footnote — kept non-fatal
       because the report is already on disk by then
-- [ ] **B-09** `parity_and_speed` (`axiom_eval/bench.py`) has no discarded warmup run, so
-      whichever model is timed first absorbs kernel-load cost and reports a bogus speedup —
-      on the XTX, `small` first reads 0.5x, `base` first reads 7.5x for the same model.
-      Parity/`token_identical` is unaffected; only timings. Fixing it invalidates the committed
-      L4 `small` row (1.2x) until that is re-run, so do both together (`docs/rocm-notes.md`)
+- [x] **B-09** `parity_and_speed` now discards one cached + one uncached warmup generate
+      before timing, and all five reference rows were re-measured the same day on L4, ROCm
+      and CPU (table in `docs/rocm-notes.md`). The suspect L4 `small` row (1.2x) was indeed
+      the warmup artifact — it re-measures at 8.7x. Parity re-confirmed everywhere:
+      `token_identical: True`, `max_abs_diff: 0.0` on every backend
 - [x] **B-10** `build_panel` printed only on forecaster completion and Python block-buffers
       to a file, so P3-00b ran 97 minutes with zero progress output. Now prints a flushed
       line every 10 anchors plus the flushed completion line; confirmed live during P3-00d

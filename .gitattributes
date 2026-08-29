@@ -1,0 +1,4 @@
+# Shell scripts run inside WSL2 on the XTX box; a CRLF checkout breaks bash there
+# (see the 2026-08-29 CRLF incidents in docs/rocm-notes.md). Pin them to LF.
+*.sh text eol=lf
+.env.example text eol=lf

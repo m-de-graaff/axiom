@@ -58,6 +58,8 @@ def parity_and_speed(
             torch.cuda.synchronize()
         return out, time.time() - started
 
+    for use_cache in (True, False):  # discarded warmup (B-09): the first generate on a
+        run(use_cache)               # device pays kernel/module load and poisons timings
     cached, cached_s = run(True)
     reference, reference_s = run(False)
     accelerator = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"

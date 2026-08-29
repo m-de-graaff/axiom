@@ -86,15 +86,16 @@ named. Create the parent first and pass the parent, as above.
   found in modules)`) because there is no `amdgpu` kernel module there. This is
   expected and not a fault. Use `rocminfo` to confirm the card, and
   `/opt/rocm-wsl/bin/amd-smi` for telemetry.
-- 2026-08-29 — **`parity_and_speed` has no warmup run, so the first model measured
-  pays one-time kernel-load cost and reports a nonsense speedup.** Measured on the
-  XTX: run `small` first and it reports 3.11s cached / 1.58s uncached (0.5x) — its
+- 2026-08-29 — **`parity_and_speed` had no warmup run, so the first model measured
+  paid one-time kernel-load cost and reported a nonsense speedup.** Measured on the
+  XTX: run `small` first and it reported 3.11s cached / 1.58s uncached (0.5x) — its
   "cached" number larger than `base`'s, which cannot be true. Run `base` first and
-  `small` reports 0.53s / 3.97s (7.5x). Parity itself is unaffected
+  `small` reported 0.53s / 3.97s (7.5x). Parity itself was unaffected
   (`token_identical: True`, `max_abs_diff: 0.0` in both orderings) — only the timings
-  move. The recorded L4 `small` row (1.2x) is suspect for the same reason. Fix is a
-  discarded warmup generate before timing; not done yet, because it invalidates the
-  committed CUDA reference numbers until they are re-run.
+  moved. **Fixed same day (B-09):** the bench now discards one cached + one uncached
+  generate before timing, and every row in the table below was re-measured with the
+  fix on all three backends. The old L4 `small` row (1.2x) was indeed the artifact —
+  it re-measures at 8.7x.
 
 ## The XTX checklist
 
@@ -140,9 +141,8 @@ $HOME/.venvs/axiom-rocm/bin/python -m pytest -q
 $HOME/.venvs/axiom-rocm/bin/python scripts/rocm_check.py --json research/rocm/parity.json
 ```
 
-Timings from step 5 are only trustworthy for the *second* model onward — the harness has
-no warmup run, so whichever model goes first absorbs kernel-load cost (see incidents).
-`token_identical` is unaffected by this and is the thing being gated on.
+`token_identical` is the thing being gated on. Timings are trustworthy since the B-09
+fix — the harness discards a warmup pass per path before timing (see incidents).
 
 `rocm_check.py` prints a markdown row for the table below. **Pass condition is
 `token_identical: True`** on every model: the cached generation loop must produce the
@@ -152,27 +152,22 @@ tag a runtime release until it is understood.
 
 ### Parity + speed of the KV cache (P4-04)
 
-64 samples, 24 steps, context = `max_context - horizon`, real weights.
+64 samples, 24 steps, context = `max_context - horizon`, real weights. All rows
+re-measured 2026-08-29 with the B-09 warmup fix (one discarded cached + uncached pass
+before timing), same torch 2.13.0 on every leg.
 
 | model | backend | cached | uncached | speedup | token-identical |
 |---|---|---|---|---|---|
-| `axiom-zero-base` | NVIDIA L4 (torch 2.13.0+cu130) | 2.82s | 25.78s | 9.1x | True |
-| `axiom-zero-small` | NVIDIA L4 (torch 2.13.0+cu130) | 1.42s | 1.66s | 1.2x (16 samples) | True |
-| `axiom-zero-small` | Windows CPU (torch 2.13.0+cpu) | 0.27s | 0.68s | 2.5x (2 samples, 4 steps) | True |
-| `axiom-zero-base` | ROCm gfx1100, WSL2 (torch 2.13.0+rocm7.2) | 1.95s | 13.23s | 6.8x | True |
-| `axiom-zero-small` | ROCm gfx1100, WSL2 (torch 2.13.0+rocm7.2) | 0.53s | 3.97s | 7.5x | True |
+| `axiom-zero-base` | NVIDIA L4 (torch 2.13.0+cu130) | 2.59s | 29.06s | 11.2x | True |
+| `axiom-zero-small` | NVIDIA L4 (torch 2.13.0+cu130) | 0.93s | 8.03s | 8.7x | True |
+| `axiom-zero-small` | Windows CPU (torch 2.13.0+cpu) | 0.19s | 0.56s | 2.9x (2 samples, 4 steps) | True |
+| `axiom-zero-base` | ROCm gfx1100, WSL2 (torch 2.13.0+rocm7.2) | 1.48s | 14.56s | 9.9x | True |
+| `axiom-zero-small` | ROCm gfx1100, WSL2 (torch 2.13.0+rocm7.2) | 0.51s | 4.01s | 7.8x | True |
 
-ROCm leg run 2026-08-29 on the XTX under WSL2, 64 samples / 24 steps / 488 context, real
-weights, torch 2.13.0+rocm7.2 — the same torch version as the CPU and L4 legs.
-**`token_identical: True` and `max_abs_diff: 0.0` on both models**, in both orderings, so
+**`token_identical: True` and `max_abs_diff: 0.0` on both models on every backend**, so
 the cached generation loop produces the same bars on ROCm that it does on CPU and CUDA.
-P3-00a's pass condition is met.
-
-The two rows above come from the run with `base` first, so `small`'s numbers are the
-post-warmup ones; the `small`-first ordering reported 3.11s / 1.58s / 0.5x for the same
-model, which is the warmup artifact and not a real result. `base` moved 9.7x → 6.8x
-between the two orderings, so treat one significant figure as the real precision here
-until the harness discards a warmup pass.
+P3-00a's pass condition is met (first passed on the pre-warmup run of 2026-08-29; parity
+was never affected by the timing bug).
 
 ### Optional while you are on that box
 
