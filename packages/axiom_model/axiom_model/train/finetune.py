@@ -72,8 +72,13 @@ def run(
     datasets_dir: Path = DATASETS_DIR,
     out_dir: Path | None = None,
     use_wandb: bool | None = None,
+    on_stage_end=None,
 ) -> dict:
-    """Run Stage A, Stage B, or both. Returns the per-stage results."""
+    """Run Stage A, Stage B, or both. Returns the per-stage results.
+
+    `on_stage_end(stage_name)` fires after each completed stage — the Modal app
+    commits the checkpoint volume there, so a Stage B failure hours later cannot
+    lose Stage A's checkpoint."""
     if stage not in ("a", "b", "all"):
         raise ValueError(f"stage {stage!r} not in ('a', 'b', 'all')")
     cfg, data_cfg = load_config(config_path)
@@ -110,6 +115,8 @@ def run(
                 fit_ds, select_ds, cfg, device, cfg.stage_dir(out_root, "tokenizer"), wb,
             ),
         )
+        if on_stage_end is not None:
+            on_stage_end("stage_a")
 
     if stage in ("b", "all") and cfg.stage_b.get("enabled", True):
         tokenizer = _stage_b_tokenizer(cfg, out_root, spec)
@@ -120,6 +127,8 @@ def run(
                 fit_ds, select_ds, cfg, device, cfg.stage_dir(out_root, "predictor"), wb,
             ),
         )
+        if on_stage_end is not None:
+            on_stage_end("stage_b")
 
     (out_root / cfg.run_name).mkdir(parents=True, exist_ok=True)
     (out_root / cfg.run_name / "meta.json").write_text(

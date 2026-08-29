@@ -64,6 +64,7 @@ def train(config_yaml: str, stage: str = "all", git_sha: str = "") -> dict:
         root=Path("/data/parquet"),
         datasets_dir=Path("/data/datasets"),
         out_dir=Path("/ckpts"),
+        on_stage_end=lambda _stage: ckpt_vol.commit(),  # survive a later-stage crash
     )
     ckpt_vol.commit()
     return {"meta": out["meta"], "results": out["results"]}
