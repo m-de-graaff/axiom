@@ -148,17 +148,22 @@ data/               local only, gitignored
   pairs Binance lists today). Delisted-mid-history symbols are absent; `XMRUSDT` and
   `WAVESUSDT` were delisted during the test window and contribute no test windows.
   Reports must say so.
-- **P3-00a/b/c are done; the Phase 3 target cell is now 1h from `axiom-zero-small` with the
-  horizon unsettled.** P3-00b re-ran the winning cell at 240 anchors on the XTX (run
-  `20260829T151050-default-d309bd8`, W&B `f6age13x`,
-  `docs/results/p3-00b-anchor-recheck.md`): the rank signal survives and strengthens
-  (1h/24 t=2.56 → 3.45, all three 1h horizons t>3, baselines still negative), but **1h/24
-  turned out to be the weakest 1h horizon** (RankIC 0.068 → 0.043, ordering 12 > 6 > 24) and
-  its post-cost tripwire reversed from +40.5 to −16.3 bps. Retargeting on those numbers would
-  be selection on test, so **P3-00d settles the horizon on `configs/eval/val.yaml` first**.
-  Calibration is unchanged and still broken (coverage 0.33–0.47 vs 0.80 nominal).
-- Next after that: **Phase 3 — fine-tune** (P3-02 onward). All Phase 3 iteration runs on
-  **val**; test is reserved for the M1 verdict.
+- **P3-00a/b/c/d are done; the Phase 3 target is 1h × `axiom-zero-small`, all three
+  horizons scored jointly — no single-horizon cell.** P3-00b (240 anchors on test, W&B
+  `f6age13x`) proved the 1h rank signal real (all horizons t>3) but inverted the horizon
+  ordering and killed 1h/24's economics; P3-00d put the choice to val (run
+  `20260829T172648-val-203dfe3`, W&B `hzeaerq9`, `docs/results/p3-00d-val-horizon.md`)
+  and **val cannot rank the horizons** — all t < 1.2 at the 60 non-overlapping anchors a
+  167-day split supports, ordering disagreeing with test's. Since training is
+  horizon-agnostic and the harness scores 6/12/24 jointly, no cell-level pick is made and
+  M1 is judged per-horizon at 1h. The same run put the zero-shot val reference on record
+  for P3-08: on val, zero-shot beats nothing and every model is under water after costs.
+  Calibration is broken on a third independent look (coverage 0.32–0.45 vs 0.80 nominal).
+- **P3-02 is done**: `finetune_csv` ported into `axiom_model/train/` (`axiom-train` CLI),
+  upstream recipe intact, windows from the segment index, normalization from
+  `axiom_data.normalization`, `splits: test` refused at config load. Next: **P3-03/P3-04**
+  (subset fine-tunes — XTX overnight or Modal). All Phase 3 iteration runs on **val**;
+  test is reserved for the M1 verdict, whose record eval runs on Modal (see TODO GATE M1).
 
 ## When unsure
 

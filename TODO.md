@@ -98,17 +98,23 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
       the eval split appears in `fit_splits` (test in `tests/test_eval.py`). Noted in the
       config: at 4h, 488 context bars eat 81 of val's 167 days, so only ~11 anchors are
       available there — 15m and 1h still hit the 60 cap, including the target cell
-- [ ] **P3-00d** *(GPU, ~1.7h on the XTX)* **Settle the horizon on val before fine-tuning.**
-      P3-00b showed 1h/24 is the weakest of the three 1h horizons on test (12 > 6 > 24) and
-      that its post-cost edge reverses, but choosing a cell because it won on test is
-      selection on test. Run `axiom-eval run --config configs/eval/val.yaml --timeframes 1h
-      --models axiom-zero-small persistence ewma lightgbm` and pick the horizon there.
-      Then update P3-01's target cell to whatever val says
+- [x] **P3-00d** *(GPU, ran ~1.2h on the XTX)* **Val cannot rank the 1h horizons** — run
+      `20260829T172648-val-203dfe3`, W&B `hzeaerq9`, writeup
+      `docs/results/p3-00d-val-horizon.md`. All three horizons land t < 1.2 at the 60
+      non-overlapping anchors a 167-day split can supply, and the point ordering
+      (6 > 24 > 12) disagrees with test's (12 > 6 > 24) — noise, not a verdict. Resolution:
+      **no single-horizon target.** Training is horizon-agnostic (next-token over 512-bar
+      windows) and the harness scores 6/12/24 jointly, so P3-01 targets 1h × `small` with
+      all three horizons, and M1 is judged per-horizon at 1h — no hand-picked cell. Bonus
+      on record: the zero-shot val reference for P3-08 (on val, zero-shot beats nothing —
+      LightGBM matches its RankIC at h6 and every model is under water after costs), and a
+      third confirmation that calibration is broken (coverage 0.32–0.45 vs 0.80)
 
 - [x] **P3-01** *(GPU)* Zero-shot grid: {mini, small, base} × {15m, 1h, 4h} × horizons {6, 12, 24};
-      target cell picked: **1h bars, starting from `axiom-zero-small`** — `small` beats `base`
-      almost everywhere (`docs/results/p2-zero-shot.md`). The **horizon is unsettled**: the 24-bar
-      pick came from 60 anchors and did not hold up at 240 (P3-00b). P3-00d settles it on val
+      target: **1h bars, starting from `axiom-zero-small`, all three horizons scored jointly** —
+      `small` beats `base` almost everywhere (`docs/results/p2-zero-shot.md`); no single-horizon
+      cell, because the 24-bar pick died at 240 anchors (P3-00b) and val lacks the power to
+      crown a replacement (P3-00d)
 - [x] **P3-02** Port `finetune_csv` → `axiom_model/train/` with config-driven entrypoint
       (`axiom-train --config configs/finetune/crypto_v0.yaml [--stage a|b]`). Losses,
       optimizer settings, OneCycle schedule and clipping norms are upstream's, unchanged;
@@ -127,6 +133,10 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 - [ ] **P3-08** Harness eval: comparison table vs zero-shot + all baselines, committed to `reports/`
 - [ ] **P3-09** Iterate (one change per run, each logged) until M1 criteria met — budget 5–15 runs
 - [ ] **GATE M1 ✅** net-of-cost RankIC > zero-shot **and** > LightGBM (positive t-stat) · coverage within ±10pp · tripwire strategy not bleeding after fees. *If LightGBM keeps winning: stop, rethink features/horizons/universe — do NOT proceed to scaling.*
+      **The verdict eval runs on Modal L4** from the frozen `default.yaml` — Modal is the
+      canonical backend (CLAUDE.md) and the record number should come from it. Iteration runs
+      (XTX/ROCm) are decision-grade — effects that matter dwarf cross-device sampling noise —
+      but they do not reproduce bitwise on an L4 and are not the number of record
 
 ## Phase 4 — FASTER → `axiom-runtime-v1` (Weeks 3–4)
 
