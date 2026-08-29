@@ -131,8 +131,8 @@ data/               local only, gitignored
   samples, 24 steps: 25.8s → 2.8s), token-identical to upstream. It is only valid when the window
   does not slide, so the eval feeds 488 context bars (488 + 24 = the trained 512).
   `tests/test_parity.py` is the real harness now (CPU in CI, CUDA via
-  `modal run infra/modal_app/parity.py`); the **ROCm leg is still owed** before any
-  `axiom-runtime-*` tag.
+  `modal run infra/modal_app/parity.py`); the **ROCm leg passed on 2026-08-29** — the XTX
+  under WSL2, token-identical on `small` and `base`, so `axiom-runtime-*` tags are unblocked.
 - **Phase: 1 — Data foundation: complete.** 50-symbol Binance USDT universe frozen in
   `configs/universe_v1.yaml`, selected on train-period median daily volume (not a live
   snapshot) with a continuity screen; 1m spot history downloaded and CHECKSUM-verified,
@@ -140,16 +140,18 @@ data/               local only, gitignored
   emits dataset hash `dc6d1a9d976d5efdcd98ba57df234be5a8ab75e79700efc10771fd4a9c1747aa`
   reproducibly on the laptop (twice) **and** on Modal from the volume copy of the corpus,
   with identical window counts; corpus on the `axiom-data` volume. Phase 1 gate met. (Update this line as gates close; details in `TODO.md`.)
-- Phase 0 complete. P0-01 (ROCm/XTX box) was set up previously for another project; its
-  torch ROCm wheel version still needs recording in `docs/rocm-notes.md` from that machine.
+- Phase 0 complete. P0-01 (ROCm/XTX box): the XTX is a **Windows** box, so the ROCm legs run
+  in WSL2 (Ubuntu 24.04, ROCm 7.14, torch 2.13.0+rocm7.2 — there is no ROCm wheel for
+  `win_amd64`). Setup, the `LD_PRELOAD` shim WSL needs, and the wheel version are in
+  `docs/rocm-notes.md`.
 - Known limitation carried into Phase 2: the universe is a survivor set (candidates are
   pairs Binance lists today). Delisted-mid-history symbols are absent; `XMRUSDT` and
   `WAVESUSDT` were delisted during the test window and contribute no test windows.
   Reports must say so.
-- Next: **Phase 3 — fine-tune**, target cell 1h × 24 bars from `axiom-zero-small`. Do P3-00a/b/c
-  first (TODO.md): the ROCm parity leg on the XTX (`scripts/rocm_check.py`, checklist in
-  `docs/rocm-notes.md`), re-running the winning cell with 240 anchors, and moving iteration onto
-  the **val** split — test has now been looked at once and is reserved for the M1 verdict.
+- Next: **Phase 3 — fine-tune**, target cell 1h × 24 bars from `axiom-zero-small`. P3-00a (ROCm
+  parity leg) is done; P3-00b/c come first (TODO.md): re-running the winning cell with 240
+  anchors, and moving iteration onto the **val** split — test has now been looked at once and is
+  reserved for the M1 verdict.
 
 ## When unsure
 

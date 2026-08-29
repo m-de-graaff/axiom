@@ -77,8 +77,12 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 
 **Start here.** In order, cheapest first:
 
-- [ ] **P3-00a** *(XTX box)* ROCm parity leg + machine notes — `scripts/rocm_check.py`, checklist
-      in `docs/rocm-notes.md`. Blocks any `axiom-runtime-*` tag, not Phase 3 itself
+- [x] **P3-00a** *(XTX box)* ROCm parity leg + machine notes — token-identical on both
+      `axiom-zero-small` and `axiom-zero-base`, `max_abs_diff 0.0`, torch 2.13.0+rocm7.2.
+      Runs in **WSL2**, not Windows (no ROCm wheel for `win_amd64`); rewritten checklist and
+      five new incidents in `docs/rocm-notes.md`. Unblocks `axiom-runtime-*` tags.
+      Found on the way: `parity_and_speed` has no warmup run, so the first model timed
+      reports a bogus speedup — parity unaffected, timings need one sig fig until fixed
 - [ ] **P3-00b** Re-run the winning cell with more anchors before trusting it:
       `modal run infra/modal_app/eval.py --timeframes 1h --max-anchors 240 --chunks 8` (~$3).
       t=2.56 rests on 60 cross-sections; if it survives 240, fine-tune toward it

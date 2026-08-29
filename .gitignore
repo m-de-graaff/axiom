@@ -13,3 +13,6 @@ node_modules/
 .next/
 dist/
 .DS_Store
+
+# scratch artifacts from machine-specific checks (numbers live in docs/)
+research/
