@@ -112,6 +112,11 @@ Never soften these to make a run finish.
   install for nothing. The grown-up, cost-aware replay is nautilus_trader in
   Phase 8, and that is the one worth a dependency.
 * **Chronos-Bolt (P2-08) not implemented.** Marked optional in the build order.
+* **488 context bars, not 512.** `panel.context_bars` feeds the last 488 bars of each
+  window, so `488 + 24 = 512` matches the trained context of `axiom-zero-{small,base}`
+  exactly. At 512 the generation loop slides its window, which drops the oldest bars
+  anyway *and* makes a KV cache impossible — 9x the cost for a worse forecast. See
+  `axiom_model/generate.py`.
 * **`reduce="none"` added to the vendored generation loop.** Upstream averages the
   MC samples inside `auto_regressive_inference`; calibration needs the individual
   paths. The default is unchanged, so `predict()` behaves exactly as upstream.

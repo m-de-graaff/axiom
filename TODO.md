@@ -85,9 +85,15 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 ## Phase 4 — FASTER → `axiom-runtime-v1` (Weeks 3–4)
 
 - [ ] **P4-01** `axiom-bench infer` baseline (50 sym × 64 samples × 24 steps) recorded on **Modal L4** and on local hardware (XTX if available; CPU reference otherwise); numbers in README
-- [ ] **P4-02** Real `tests/test_parity.py`: greedy token-identical + MC moment tolerance; tiny-config CPU version wired into CI
+- [x] **P4-02** Real `tests/test_parity.py`: token-identical under a fixed seed + MC moment
+      tolerance; tiny-config CPU version in CI, CUDA leg via `modal run infra/modal_app/parity.py`
+      (ROCm leg still owed before any `axiom-runtime-*` tag)
 - [ ] **P4-03** Batch the MC dimension: one forward pass over (symbols × samples)
-- [ ] **P4-04** KV-cache audit of the generation loop; implement per-layer caching if absent
+- [x] **P4-04** KV-cache audit: absent upstream — every step re-ran a full forward over the whole
+      window. Per-layer cache added (`axiom_model/generate.py`), **9.1x** on `axiom-zero-base`
+      (64 samples, 24 steps, L4: 25.8s -> 2.8s), token-identical. Pulled forward from Phase 4
+      because the P2 grid was otherwise a ~$60 Modal bill. Only valid when the window does not
+      slide (`context + horizon <= max_context`); upstream's loop still serves the rest
 - [ ] **P4-05** bf16 weights + autocast path
 - [ ] **P4-06** Attention via SDPA everywhere; `flash-attn` only as optional CUDA extra
 - [ ] **P4-07** `torch.compile(mode="reduce-overhead")` on decode step; `--no-compile` flag preserved
