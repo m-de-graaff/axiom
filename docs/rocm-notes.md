@@ -13,6 +13,30 @@ no CUDA-only deps, keep --no-compile working, never assume a local GPU).
 | Modal (T4/L4/A10G/A100) | CUDA | baked into the Modal image (`pip_install("torch")`) | 2.13.0 (cu13) |
 | XTX box (RX 7900 XTX, gfx1100) | ROCm 7.14 via **WSL2** | see the XTX checklist below — `--index-url https://download.pytorch.org/whl/rocm7.2` | 2.13.0+rocm7.2 |
 
+The laptop row and the XTX row are **two different machines**. The XTX box is a Ryzen
+7800X3D desktop; as of 2026-08-29 it is set up for GPU eval work and carries:
+
+| what | where | note |
+|---|---|---|
+| WSL ROCm env | `~/.venvs/axiom-rocm` (inside WSL) | out-of-tree on purpose; the Windows `.venv` is separate and CPU-only |
+| Windows CPU env | `.venv` | `ruff`/`pytest` run here |
+| `modal` CLI | `uv tool install modal`, profile `m-de-graaff` | the system `pip` launcher is broken on Windows; use `uv tool` |
+| `.env` | repo root, gitignored | holds `WANDB_API_KEY`. **Keep it LF** — see incidents |
+| corpus | `data/parquet/binance/*/1h` | **1h only**, 50 symbols, 4028 files, 155 MB, pulled from the `axiom-data` volume. The 1m source is not here |
+| manifest | `data/datasets/crypto_v1/` | hash `dc6d1a9d…`, matches the frozen value |
+
+Because only 1h is present, `axiom-data build` cannot be re-run here to re-derive the
+hash — the manifest is trusted from the volume. Any eval at 15m or 4h needs those
+timeframes pulled first:
+
+```bash
+modal volume get axiom-data "parquet/binance/$SYM/4h" "data/parquet/binance/$SYM"
+```
+
+Note `modal volume get` **flattens a directory onto the destination when the destination
+does not exist** — it will happily write the last file of a directory *as* the path you
+named. Create the parent first and pass the parent, as above.
+
 ## Incidents
 
 - 2026-08-28 — Windows: the system `pip` launcher is broken (points at a
@@ -51,6 +75,13 @@ no CUDA-only deps, keep --no-compile working, never assume a local GPU).
   AMD's own instructions say to delete the bundled library and copy the system one
   over it; the `LD_PRELOAD` above is the reversible version of the same thing, and
   it survives a torch reinstall. Every ROCm command below needs it.
+- 2026-08-29 — **CRLF bites twice on this box.** Any file written by Windows tooling and
+  then read by bash carries ``: a symbol list produced `data/parquet/binance/BTCUSDT`
+  (25 junk directories, and Windows mangles the `` to U+F00D so `endswith("")` does not
+  match them), and a `.env` copied from `.env.example` handed wandb a key with a trailing
+  ``, which it rejects as "API key cannot start or end with whitespace". Write these
+  files with `newline="
+"`, and normalize `.env` if login fails for no visible reason.
 - 2026-08-29 — `rocm-smi` does not work in WSL (`Driver not initialized (amdgpu not
   found in modules)`) because there is no `amdgpu` kernel module there. This is
   expected and not a fault. Use `rocminfo` to confirm the card, and

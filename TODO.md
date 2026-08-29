@@ -202,3 +202,17 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 - [ ] **B-05** Publish Axiom weights (check NeoQuasar model-card licenses first) + model card
 - [ ] **B-06** Export this TODO to GitHub Issues (`gh issue create` script) if file-based tracking stops scaling
 - [ ] **B-07** Survivorship-free universe: enumerate every symbol ever published under `data/spot/monthly/klines/` on data.binance.vision (delisted ones are still hosted) and re-select `universe_v2` from that pool. Today's candidates come from the pairs Binance lists *now*, so coins that died before today are invisible to the screen
+- [ ] **B-08** `wandb` is not declared in any `pyproject.toml`, and `_log_wandb` catches the
+      ImportError and prints `wandb logging skipped: ...`. On a machine without it, a run with
+      `wandb.enabled: true` produces **no W&B record and no failure** — a silent hole under
+      golden rule 1. Either declare the dependency or make that handler loud when the config
+      explicitly asks for W&B. Found 2026-08-29 setting up the XTX for P3-00b
+- [ ] **B-09** `parity_and_speed` (`axiom_eval/bench.py`) has no discarded warmup run, so
+      whichever model is timed first absorbs kernel-load cost and reports a bogus speedup —
+      on the XTX, `small` first reads 0.5x, `base` first reads 7.5x for the same model.
+      Parity/`token_identical` is unaffected; only timings. Fixing it invalidates the committed
+      L4 `small` row (1.2x) until that is re-run, so do both together (`docs/rocm-notes.md`)
+- [ ] **B-10** `build_panel` prints one line per forecaster only on completion, so a multi-hour
+      run redirected to a file shows nothing at all (Python block-buffers stdout). P3-00b was
+      97 minutes with zero progress output — health had to be checked via `amd-smi`. Add
+      `flush=True` or run under `python -u`, and consider a per-anchor counter
