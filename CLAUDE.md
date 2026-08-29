@@ -49,7 +49,7 @@ modal run infra/modal_app/eval.py                                  # same run on
 uv run axiom-bench infer --model axiom-ft-crypto-v0 --symbols 50    # once implemented (P4)
 
 # Modal
-modal run infra/modal_app/train.py::train --config-yaml "$(cat configs/finetune/crypto_v0.yaml)"
+AXIOM_TRAIN_GPU=L4 modal run --detach infra/modal_app/train.py --config configs/finetune/crypto_v0.yaml
 modal deploy infra/modal_app/infer_cron.py
 modal volume put axiom-data data/parquet /parquet
 

@@ -1,7 +1,10 @@
 """Modal training app (P3-05) — `axiom_model.train.finetune.run` on the volumes.
 
 usage:
-  modal run infra/modal_app/train.py::train --config-yaml "$(cat configs/finetune/crypto_v0.yaml)"
+  modal run --detach infra/modal_app/train.py --config configs/finetune/crypto_v0.yaml
+
+The entrypoint reads the config locally and ships its *content* — passing YAML
+through the shell as an argument mangles it on Windows.
 
 GPU defaults to the full-run policy (A100-80GB). For subset fine-tunes and smoke
 runs, set AXIOM_TRAIN_GPU before `modal run` (read at app build time, locally):
@@ -71,13 +74,14 @@ def train(config_yaml: str, stage: str = "all", git_sha: str = "") -> dict:
 
 
 @app.local_entrypoint()
-def main(config_yaml: str, stage: str = "all"):
+def main(config: str = "configs/finetune/crypto_v0.yaml", stage: str = "all"):
     import subprocess
 
     try:
         sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     except (subprocess.CalledProcessError, OSError):
         sha = ""
+    config_yaml = pathlib.Path(config).read_text(encoding="utf-8")
     out = train.remote(config_yaml=config_yaml, stage=stage, git_sha=sha)
     for stage_name, result in out["results"].items():
         print(f"{stage_name}: best_val_loss {result['best_val_loss']:.4f} -> {result['path']}")
