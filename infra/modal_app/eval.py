@@ -128,7 +128,8 @@ def shard(
     secrets=[modal.Secret.from_name("wandb")],
 )
 def assemble(
-    config: str, tag: str, environment: dict | None = None, use_wandb: bool = True
+    config: str, tag: str, environment: dict | None = None, use_wandb: bool = True,
+    git_sha: str = "",
 ) -> dict:
     """Concatenate every checkpointed chunk and write the report.
 
@@ -136,10 +137,14 @@ def assemble(
     actually came from.
     """
     _setup()
+    import os
+
     import pandas as pd
     from axiom_eval.panel import load_config
     from axiom_eval.run import finalize
 
+    if git_sha:  # the container has no git; the SHA is the run's identity (CLAUDE.md rule 5)
+        os.environ["AXIOM_GIT_SHA"] = git_sha
     data_vol.reload()
     parts = sorted((PANELS / tag).glob("*.parquet"))
     if not parts:
@@ -176,12 +181,15 @@ def _write_report(out: dict) -> pathlib.Path:
     return dest
 
 
+def _git_sha() -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+
+
 def _tag(config: str) -> str:
     """Chunks are keyed by config + code version, so a resume never mixes versions."""
-    sha = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True
-    ).stdout.strip()
-    return f"{pathlib.Path(config).stem}-{sha or 'nogit'}"
+    return f"{pathlib.Path(config).stem}-{_git_sha()[:7] or 'nogit'}"
 
 
 @app.local_entrypoint()
@@ -212,10 +220,10 @@ def main(
         print(f"  {result['tf']:>4} {result['model']:<20} chunk {result['index']:>2}  {state}")
         env = result.get("environment") or env
 
-    _write_report(assemble.remote(config, tag, env, wandb))
+    _write_report(assemble.remote(config, tag, env, wandb, _git_sha()))
 
 
 @app.local_entrypoint()
 def assemble_only(config: str = "configs/eval/default.yaml", tag: str = "", wandb: bool = True):
     """Build the report from whatever chunks are already on the volume."""
-    _write_report(assemble.remote(config, tag or _tag(config), None, wandb))
+    _write_report(assemble.remote(config, tag or _tag(config), None, wandb, _git_sha()))

@@ -9,6 +9,7 @@ many symbols happened to be present, or on which machine ran it.
 from __future__ import annotations
 
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -28,6 +29,11 @@ DATASETS_DIR = Path("data/datasets")
 
 
 def _git_sha() -> str:
+    """The run's identity. `AXIOM_GIT_SHA` covers machines with the code but no repo
+    (Modal containers get the directory, not the .git)."""
+    injected = os.environ.get("AXIOM_GIT_SHA")
+    if injected:
+        return injected
     try:
         return subprocess.check_output(
             ["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL
