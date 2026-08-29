@@ -13,6 +13,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -109,19 +110,25 @@ def build_panel(
     for tf in timeframes or cfg.panel["timeframes"]:
         bars = load_split_bars(cfg, data_cfg, tf, root=root, symbols=symbols)
         if not bars:
-            print(f"  {tf}: no bars under {root}, skipped")
+            print(f"  {tf}: no bars under {root}, skipped", flush=True)
             continue
         for fc in forecasters.build(
             cfg, data_cfg, tf, root=root, device=device, models=models, symbols=symbols
         ):
             t0, n = time.time(), 0
-            for anchor, windows in cross_sections(cfg, data_cfg, tf, bars, chunk):
+            for a, (anchor, windows) in enumerate(
+                cross_sections(cfg, data_cfg, tf, bars, chunk), start=1
+            ):
                 frames.append(
                     _rows(fc, tf, anchor, windows, horizons, cfg.mc["samples"], cfg.seed,
                           band, cfg.panel["vol_window"])
                 )
                 n += len(windows)
-            print(f"  {tf:>4} {fc.name:<20} {n:>6} windows  {time.time() - t0:7.1f}s")
+                if a % 10 == 0:  # a multi-hour run must not look hung in a log file
+                    print(f"  {tf:>4} {fc.name:<20} anchor {a:>4}  {time.time() - t0:7.1f}s",
+                          flush=True)
+            print(f"  {tf:>4} {fc.name:<20} {n:>6} windows  {time.time() - t0:7.1f}s",
+                  flush=True)
     if not frames:
         raise ValueError("empty panel — no windows scored (check the corpus and split bounds)")
     return pd.concat(frames, ignore_index=True)
@@ -141,6 +148,14 @@ def run(
 ) -> dict:
     """Run the harness end to end and write `reports/{run_id}/`."""
     cfg, data_cfg = load_config(config_path)
+    if _wandb_requested(cfg, use_wandb):
+        try:  # fail before the panel build, not after the multi-hour part (B-08)
+            import wandb  # noqa: F401
+        except ImportError as exc:
+            raise ImportError(
+                "the config asks for W&B but wandb is not importable — "
+                "`uv sync` (it is a declared dependency now) or pass --no-wandb"
+            ) from exc
     if max_anchors is not None:
         cfg.panel["max_anchors"] = max_anchors
     seed_everything(cfg.seed)
@@ -225,9 +240,15 @@ def finalize(
     return {"run_id": run_id, "path": str(dest), "meta": meta, "table": headline, "panel": panel}
 
 
+def _wandb_requested(cfg, use_wandb: bool | None) -> bool:
+    return cfg.wandb.get("enabled", False) if use_wandb is None else use_wandb
+
+
 def _log_wandb(cfg, meta: dict, headline: pd.DataFrame, dest: Path, use_wandb: bool | None) -> None:
-    """W&B is tracking, not a dependency: a missing login never fails a run."""
-    if not (cfg.wandb.get("enabled", False) if use_wandb is None else use_wandb):
+    """Failures here must not take the run down — the report is already on disk by the
+    time this is called. But a run the config asked to track and that silently isn't
+    tracked "didn't happen" (golden rule 1), so failures are loud, not a footnote."""
+    if not _wandb_requested(cfg, use_wandb):
         return
     try:
         import wandb
@@ -245,8 +266,12 @@ def _log_wandb(cfg, meta: dict, headline: pd.DataFrame, dest: Path, use_wandb: b
                 w.log({f"{tag}/{k}": v for k, v in row.items()
                        if isinstance(v, int | float) and k not in ("horizon",)})
             w.save(str(dest / "report.html"), base_path=str(dest.parent), policy="now")
-    except Exception as exc:  # noqa: BLE001 — tracking must never take the run down
-        print(f"  wandb logging skipped: {exc}")
+    except Exception as exc:  # noqa: BLE001 — see docstring: loud, but not fatal
+        print(
+            f"\n*** W&B LOGGING FAILED for {meta['run_id']}: {exc}\n"
+            f"*** The report under {dest} is intact — re-log it, do not re-run.",
+            file=sys.stderr, flush=True,
+        )
 
 
 __all__ = ["build_panel", "environment_info", "finalize", "run", "seed_everything"]

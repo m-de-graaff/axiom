@@ -5,7 +5,7 @@ description = "Axiom eval package"
 requires-python = ">=3.11"
 # torch is NOT here (see CLAUDE.md) — only the model forecaster needs it, and it is
 # imported lazily so baselines run on a machine without it.
-dependencies = ["pandas", "numpy", "scipy", "pyyaml", "axiom-data", "lightgbm"]
+dependencies = ["pandas", "numpy", "scipy", "pyyaml", "axiom-data", "lightgbm", "wandb"]
 
 [project.scripts]
 axiom-eval = "axiom_eval.cli:main"
