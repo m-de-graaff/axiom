@@ -146,9 +146,10 @@ data/               local only, gitignored
   pairs Binance lists today). Delisted-mid-history symbols are absent; `XMRUSDT` and
   `WAVESUSDT` were delisted during the test window and contribute no test windows.
   Reports must say so.
-- Next: **Phase 3 — fine-tune.** P3-01's cell picking is largely done by the zero-shot grid
-  (1h, 24 bars, starting from `axiom-zero-small` rather than `base`); re-run that cell with more
-  anchors before trusting it, since t=2.56 rests on 60 cross-sections.
+- Next: **Phase 3 — fine-tune**, target cell 1h × 24 bars from `axiom-zero-small`. Do P3-00a/b/c
+  first (TODO.md): the ROCm parity leg on the XTX (`scripts/rocm_check.py`, checklist in
+  `docs/rocm-notes.md`), re-running the winning cell with 240 anchors, and moving iteration onto
+  the **val** split — test has now been looked at once and is reserved for the M1 verdict.
 
 ## When unsure
 

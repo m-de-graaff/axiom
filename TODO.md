@@ -75,7 +75,20 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 
 ## Phase 3 — Zero-Shot Baseline & Fine-Tune → **M1** (Weeks 2–3)
 
-- [ ] **P3-01** *(GPU)* Zero-shot grid: {mini, small, base} × {15m, 1h, 4h} × horizons {6, 12, 24}; pick target cells
+**Start here.** In order, cheapest first:
+
+- [ ] **P3-00a** *(XTX box)* ROCm parity leg + machine notes — `scripts/rocm_check.py`, checklist
+      in `docs/rocm-notes.md`. Blocks any `axiom-runtime-*` tag, not Phase 3 itself
+- [ ] **P3-00b** Re-run the winning cell with more anchors before trusting it:
+      `modal run infra/modal_app/eval.py --timeframes 1h --max-anchors 240 --chunks 8` (~$3).
+      t=2.56 rests on 60 cross-sections; if it survives 240, fine-tune toward it
+- [ ] **P3-00c** **Iterate on `val` from here on.** The test split has been looked at once
+      (`docs/results/p2-zero-shot.md`); every further look costs honesty. Set `split: val` in a
+      `configs/eval/val.yaml` copy and keep `default.yaml` for the M1 verdict only
+
+- [x] **P3-01** *(GPU)* Zero-shot grid: {mini, small, base} × {15m, 1h, 4h} × horizons {6, 12, 24};
+      target cell picked: **1h × 24 bars, starting from `axiom-zero-small`** — the only cell with
+      RankIC t > 2, and `small` beats `base` almost everywhere (`docs/results/p2-zero-shot.md`)
 - [ ] **P3-02** Port `finetune_csv` → `axiom_model/train/` with config-driven entrypoint *(pure code — laptop OK)*
 - [ ] **P3-03** *(GPU: XTX overnight or Modal A10G/L4)* Stage A (tokenizer) subset fine-tune
 - [ ] **P3-04** *(GPU: XTX overnight or Modal A10G/L4)* Stage B (predictor) subset fine-tune
@@ -109,14 +122,18 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
 
 - [ ] **M2-01** Positional-encoding audit → RoPE migration plan (or NTK/PI scaling if already rotary)
 - [ ] **M2-02** Continued pretrain @ 2048 ctx on Modal H100 (~50–150 GPU-h); **gate:** ≥ 512-ctx model on RankIC/calibration, gap widens on regime-shift slices
-- [ ] **M3-01** Direction + quantile heads (frozen→unfrozen); **gate:** beat MC-derived probabilities on Brier/calibration at ≤ latency
+- [ ] **M3-01** Direction + quantile heads (frozen→unfrozen); **gate:** beat MC-derived probabilities on Brier/calibration at ≤ latency.
+      **Candidate to pull forward:** the zero-shot MC fan is badly miscalibrated (10–90 coverage
+      0.19–0.47 vs nominal 0.80), and Phase 6 cannot ship an honest `p_up` until that is fixed —
+      try temperature/sample-count first, this head second
 - [ ] **M4-01** Funding/OI side-channel embeddings (tokenizer v2 only if needed); **gate:** futures-slice improvement, no spot regression
 - [ ] **M5-00** GO/NO-GO review for from-scratch 300–500M pretrain — requires M1–M4 shipped **+** stable paper-trading edge (P8) **+** an identified scale-only limitation. Budget $10–40k. Write the decision memo either way.
 
 ## Phase 6 — Signal Service (Weeks 5–6)
 
 - [ ] **P6-01** Provision Postgres (Hetzner+Timescale or Neon); apply `db/schema.sql`
-- [ ] **P6-02** `axiom_signals`: paths → `p_up / exp_ret / band / conf / stance`; unit tests; thresholds in config only
+- [ ] **P6-02** `axiom_signals`: paths → `p_up / exp_ret / band / conf / stance`; unit tests; thresholds in config only.
+      **Blocked on calibration** — see M3-01 and `docs/results/p2-zero-shot.md`
 - [ ] **P6-03** ccxt latest-bars puller with retries + staleness guard (refuse > 2-bar-old data)
 - [ ] **P6-04** `infer_cron.py` on Modal L4, `Cron("2 * * * *")`; idempotent upserts on `(symbol, tf, made_at)`
 - [ ] **P6-05** Failure alerting (Telegram/Discord webhook) + `runs` table
