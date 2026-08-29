@@ -149,9 +149,11 @@ data/               local only, gitignored
   `WAVESUSDT` were delisted during the test window and contribute no test windows.
   Reports must say so.
 - Next: **Phase 3 — fine-tune**, target cell 1h × 24 bars from `axiom-zero-small`. P3-00a (ROCm
-  parity leg) is done; P3-00b/c come first (TODO.md): re-running the winning cell with 240
-  anchors, and moving iteration onto the **val** split — test has now been looked at once and is
-  reserved for the M1 verdict.
+  parity leg) and P3-00c (`configs/eval/val.yaml` — all Phase 3 iteration runs on **val**; test
+  is reserved for the M1 verdict) are done. **P3-00b is the one still open**: re-run the winning
+  cell on test with 240 anchors (`modal run infra/modal_app/eval.py --timeframes 1h
+  --max-anchors 240 --chunks 8`, ~$3) before committing to a fine-tune — t=2.56 rests on 60
+  cross-sections.
 
 ## When unsure
 
