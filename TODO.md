@@ -151,7 +151,13 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
       0.32–0.45 → 0.48–0.59 (vs 0.80 nominal) — the fan's miscalibration looks like
       domain shift, not architecture. RankIC unchanged within val's power; economics
       still negative panel-wide. Full table incl. baselines is the M1-record eval
-- [ ] **P3-09** Iterate (one change per run, each logged) until M1 criteria met — budget 5–15 runs
+- [~] **P3-09** Iterate (one change per run, each logged) until M1 criteria met — budget 5–15
+      runs. Run 2 done (`crypto_v1.yaml`, W&B `2ydtny0x`/`nob2fcsh`,
+      `docs/results/p3-09-ft-v1-val.md`): Stage B at 3 epochs beats 20 on CE (2.7922 vs
+      2.7930) and on val RankIC at every horizon (point estimates; all t < 2 — val cannot
+      establish rank differences). Distributional gains unchanged from v0. **v1 is the new
+      baseline recipe.** Next candidates: target calibration (val can measure it) — e.g.
+      MC temperature/top_p, or more Stage A epochs (it was still improving at 30)
 - [ ] **GATE M1 ✅** net-of-cost RankIC > zero-shot **and** > LightGBM (positive t-stat) · coverage within ±10pp · tripwire strategy not bleeding after fees. *If LightGBM keeps winning: stop, rethink features/horizons/universe — do NOT proceed to scaling.*
       **The verdict eval runs on Modal L4** from the frozen `default.yaml` — Modal is the
       canonical backend (CLAUDE.md) and the record number should come from it. Iteration runs
