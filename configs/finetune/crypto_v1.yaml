@@ -1,0 +1,56 @@
+# Fine-tune run 2. The ONE change vs crypto_v0.yaml: stage_b.epochs 20 -> 3.
+# Both v0 training attempts put the best val CE at epoch 2 of 20 with monotonic
+# worsening after (W&B 4jf1fhsy; docs/results/p3-08-ft-v0-val.md) — 3 epochs keeps
+# one epoch of slack past the observed bottom. Note the OneCycle schedule compresses
+# with the epoch count; that is part of the change, not a second variable.
+#
+# Stage A is not retrained: its config is identical to v0's, so run 2 reuses v0's
+# tokenizer checkpoint outright (stage_b.tokenizer below). That removes Stage A
+# sampling variance from the v0-vs-v1 comparison instead of adding it.
+run_name: axiom-ft-25m-crypto1-512-v1
+seed: 1337
+precision: bf16
+data: configs/data/crypto_v1.yaml
+
+init:
+  model: axiom-zero-small
+
+window:
+  timeframes: [1h]
+  context_bars: 488
+  horizon_bars: 24
+
+splits:
+  fit: train
+  select: val
+
+loader:
+  batch_size: 32
+  num_workers: 4
+  train_samples_per_epoch: 64000
+  val_samples: 12800
+
+stage_a:
+  enabled: false               # reusing v0's tokenizer — see header
+  epochs: 30
+  lr: 2.0e-4
+  weight_decay: 0.1
+  grad_clip: 2.0
+  accumulation_steps: 1
+
+stage_b:
+  enabled: true
+  epochs: 3                    # <- the change (v0: 20; val CE bottomed at 2)
+  lr: 4.0e-5
+  betas: [0.9, 0.95]
+  weight_decay: 0.1
+  grad_clip: 3.0
+  tokenizer: ckpts/axiom-ft-25m-crypto1-512-v0/tokenizer/best_model
+
+log_interval: 50
+out_dir: data/checkpoints
+
+wandb:
+  enabled: true
+  project: axiom
+  entity: mark_degraaff-not-applicable

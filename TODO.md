@@ -135,14 +135,14 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
       Best-epoch selection saved the epoch-2 weights. Registered as
       `axiom-ft-25m-crypto1-512-v0` (`ckpts/` source, resolved via `AXIOM_CKPTS_ROOT`).
       The legitimate single change for run 2: cut Stage B epochs (or LR)
-- [~] **P3-05** Modal training app (`infra/modal_app/train.py`): checkpoints to volume, resume, W&B.
-      **Verified end-to-end 2026-08-29 on an L4** (smoke: both stages on the volume corpus —
-      1,474,084 train windows — bf16, checkpoints committed to `axiom-ckpts` under
-      `axiom-ft-smoke/`, ~$0.20). GPU via `AXIOM_TRAIN_GPU` env (default A100-80GB per
-      policy; set `L4`/`A10G` for subset runs). W&B on Modal verified live during P3-03/04.
-      Still owed, now urgent: **resume from checkpoint** — the P3-03/04 run was preempted
-      at ~95% and the auto-retry restarted from Stage A scratch (~$3 and ~4h burned).
-      Per-stage volume commits saved Stage A's checkpoint but not mid-stage progress
+- [x] **P3-05** Modal training app (`infra/modal_app/train.py`): checkpoints to volume,
+      resume, W&B — all three in. Verified end-to-end on an L4 (smoke ~$0.20, then the real
+      P3-03/04 run); GPU via `AXIOM_TRAIN_GPU` (default A100-80GB per policy); W&B verified
+      live. **Resume** added after the P3-03/04 preemption burned ~$3/4h: `state.pt`
+      (weights + optimizer + scheduler + history) saved every epoch, volume committed every
+      epoch, restarted stages resume at the next epoch and finished stages return
+      immediately — Modal's auto-retry is now idempotent. Epoch-granular, not bitwise
+      (RNG stream differs from an uninterrupted run); covered in `tests/test_train.py`
 - [ ] **P3-06** Full-corpus Stage A on A100-80GB
 - [ ] **P3-07** Full-corpus Stage B on A100-80GB → `axiom-ft-102m-crypto1-512-v0`
 - [~] **P3-08** Harness eval: comparison table vs zero-shot + all baselines. First look done

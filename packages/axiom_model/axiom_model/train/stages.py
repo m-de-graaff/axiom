@@ -4,6 +4,13 @@ Losses, clipping norms, optimizer settings and the OneCycle schedule are upstrea
 unchanged — first runs must be attributable to data, not to a rewritten recipe.
 Differences: no DDP (single GPU everywhere through M1), optional bf16 autocast,
 metrics go to the caller's W&B run instead of Comet, prints flush (B-10).
+
+Resume (P3-05): after every epoch the full training state (weights, optimizer,
+scheduler, best-so-far, history) lands in `{save_dir}/state.pt`; a restarted stage
+picks up at the next epoch, and a finished stage returns immediately — which is what
+makes a Modal preemption retry cheap instead of a from-scratch rerun. Resume is
+epoch-granular and not bitwise: the global RNG stream differs from an uninterrupted
+run (data order per epoch does not — loaders are seeded per epoch).
 """
 
 from __future__ import annotations
@@ -40,6 +47,39 @@ def _save_best(model, save_dir: Path) -> Path:
     return dest
 
 
+def _save_state(save_dir: Path, model, optimizer, scheduler, epochs_done: int,
+                best: float, history: list) -> None:
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "epochs_done": epochs_done,
+            "best": best,
+            "history": history,
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+        },
+        Path(save_dir) / "state.pt",
+    )
+
+
+def _resume(save_dir: Path, stage: str, model, optimizer, scheduler) -> tuple[int, float, list]:
+    """Restore `state.pt` if present. Returns `(epochs_done, best, history)`."""
+    path = Path(save_dir) / "state.pt"
+    if not path.exists():
+        return 0, float("inf"), []
+    state = torch.load(path, map_location="cpu")
+    model.load_state_dict(state["model"])
+    optimizer.load_state_dict(state["optimizer"])
+    scheduler.load_state_dict(state["scheduler"])
+    print(
+        f"  [{stage}] resuming after epoch {state['epochs_done']} "
+        f"(best val {state['best']:.4f})",
+        flush=True,
+    )
+    return state["epochs_done"], state["best"], list(state["history"])
+
+
 def fit_tokenizer(
     tokenizer,
     fit_ds: Dataset,
@@ -48,6 +88,7 @@ def fit_tokenizer(
     device: str,
     save_dir: Path,
     wandb_run=None,
+    on_epoch_end=None,
 ) -> dict:
     """Stage A: reconstruction + BSQ loss on the tokenizer, best-val checkpointing."""
     stage = cfg.stage_a
@@ -62,8 +103,9 @@ def fit_tokenizer(
     scheduler = _scheduler(optimizer, float(stage["lr"]), steps_per_epoch, epochs)
     val_loader = select_loader(select_ds, cfg)
 
-    best, history, step = float("inf"), [], 0
-    for epoch in range(epochs):
+    start_epoch, best, history = _resume(save_dir, "stage_a", tokenizer, optimizer, scheduler)
+    step = start_epoch * steps_per_epoch
+    for epoch in range(start_epoch, epochs):
         t0 = time.time()
         tokenizer.train()
         train_loss_sum, train_batches = 0.0, 0
@@ -107,6 +149,9 @@ def fit_tokenizer(
             val_sum / max(val_count, 1), best, save_dir, t0, wandb_run,
         )
         history.append(entry)
+        _save_state(save_dir, tokenizer, optimizer, scheduler, epoch + 1, best, history)
+        if on_epoch_end is not None:
+            on_epoch_end()
     return {"best_val_loss": best, "history": history, "path": str(Path(save_dir) / "best_model")}
 
 
@@ -119,6 +164,7 @@ def fit_predictor(
     device: str,
     save_dir: Path,
     wandb_run=None,
+    on_epoch_end=None,
 ) -> dict:
     """Stage B: next-token cross-entropy on the predictor, tokens from a frozen
     tokenizer encoded on the fly (upstream behaviour)."""
@@ -142,8 +188,9 @@ def fit_predictor(
         loss, _, _ = model.head.compute_loss(logits[0], logits[1], s1[:, 1:], s2[:, 1:])
         return loss
 
-    best, history, step = float("inf"), [], 0
-    for epoch in range(epochs):
+    start_epoch, best, history = _resume(save_dir, "stage_b", model, optimizer, scheduler)
+    step = start_epoch * steps_per_epoch
+    for epoch in range(start_epoch, epochs):
         t0 = time.time()
         model.train()
         train_loss_sum, train_batches = 0.0, 0
@@ -179,6 +226,9 @@ def fit_predictor(
             val_sum / max(val_batches, 1), best, save_dir, t0, wandb_run,
         )
         history.append(entry)
+        _save_state(save_dir, model, optimizer, scheduler, epoch + 1, best, history)
+        if on_epoch_end is not None:
+            on_epoch_end()
     return {"best_val_loss": best, "history": history, "path": str(Path(save_dir) / "best_model")}
 
 

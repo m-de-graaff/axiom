@@ -68,6 +68,7 @@ def train(config_yaml: str, stage: str = "all", git_sha: str = "") -> dict:
         datasets_dir=Path("/data/datasets"),
         out_dir=Path("/ckpts"),
         on_stage_end=lambda _stage: ckpt_vol.commit(),  # survive a later-stage crash
+        on_epoch_end=ckpt_vol.commit,  # preemption loses at most one epoch (resume)
     )
     ckpt_vol.commit()
     return {"meta": out["meta"], "results": out["results"]}

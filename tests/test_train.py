@@ -168,6 +168,44 @@ def test_stage_a_trains_and_checkpoints_a_loadable_tokenizer(rig, tmp_path):
     assert reloaded.s1_bits == tokenizer.s1_bits
 
 
+def test_stage_a_resumes_after_a_simulated_preemption(rig, tmp_path):
+    """Crash after epoch 2 of 4; a fresh process must resume at epoch 3, and a
+    finished stage must return immediately instead of retraining."""
+    from axiom_model.train.config import load_config
+    from axiom_model.train.data import build_dataset
+    from axiom_model.train.stages import fit_tokenizer
+
+    ft_yaml, root, datasets_dir, _ = rig
+    raw = yaml.safe_load(ft_yaml.read_text())
+    raw["stage_a"]["epochs"] = 4
+    ft_yaml.write_text(yaml.safe_dump(raw))
+    cfg, data_cfg = load_config(ft_yaml)
+    fit_ds = build_dataset(cfg, data_cfg, "train", root, datasets_dir)
+    select_ds = build_dataset(cfg, data_cfg, "val", root, datasets_dir)
+    save_dir = tmp_path / "tok"
+
+    calls = {"n": 0}
+
+    def preempt():
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("preempted")
+
+    with pytest.raises(RuntimeError, match="preempted"):
+        fit_tokenizer(_tiny_modules()[0], fit_ds, select_ds, cfg, "cpu", save_dir,
+                      on_epoch_end=preempt)
+    assert (save_dir / "state.pt").exists()
+
+    # The "retry": a freshly initialized model, same save_dir — resumes, finishes.
+    result = fit_tokenizer(_tiny_modules()[0], fit_ds, select_ds, cfg, "cpu", save_dir)
+    assert [e["epoch"] for e in result["history"]] == [1, 2, 3, 4]
+
+    # A completed stage is idempotent: no further epochs, same best.
+    again = fit_tokenizer(_tiny_modules()[0], fit_ds, select_ds, cfg, "cpu", save_dir)
+    assert [e["epoch"] for e in again["history"]] == [1, 2, 3, 4]
+    assert again["best_val_loss"] == result["best_val_loss"]
+
+
 def test_stage_b_trains_and_checkpoints_a_loadable_predictor(rig, tmp_path):
     from axiom_model.train.config import load_config
     from axiom_model.train.data import build_dataset

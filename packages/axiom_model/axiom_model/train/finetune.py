@@ -19,7 +19,7 @@ import numpy as np
 import torch
 from axiom_data import store
 
-from ..registry import resolve
+from ..registry import _resolve_source, resolve
 from ..tokenizer import AxiomTokenizer
 from ..transformer import Axiom
 from .config import DATASETS_DIR, dataset_hash, load_config
@@ -73,12 +73,14 @@ def run(
     out_dir: Path | None = None,
     use_wandb: bool | None = None,
     on_stage_end=None,
+    on_epoch_end=None,
 ) -> dict:
     """Run Stage A, Stage B, or both. Returns the per-stage results.
 
-    `on_stage_end(stage_name)` fires after each completed stage — the Modal app
-    commits the checkpoint volume there, so a Stage B failure hours later cannot
-    lose Stage A's checkpoint."""
+    `on_stage_end(stage_name)` fires after each completed stage and
+    `on_epoch_end()` after every epoch — the Modal app commits the checkpoint
+    volume in both, so a preemption loses at most one epoch and the retry
+    resumes from `state.pt` instead of restarting the stage."""
     if stage not in ("a", "b", "all"):
         raise ValueError(f"stage {stage!r} not in ('a', 'b', 'all')")
     cfg, data_cfg = load_config(config_path)
@@ -113,6 +115,7 @@ def run(
             lambda wb: fit_tokenizer(
                 AxiomTokenizer.from_pretrained(spec.tokenizer_source),
                 fit_ds, select_ds, cfg, device, cfg.stage_dir(out_root, "tokenizer"), wb,
+                on_epoch_end=on_epoch_end,
             ),
         )
         if on_stage_end is not None:
@@ -125,6 +128,7 @@ def run(
             lambda wb: fit_predictor(
                 Axiom.from_pretrained(spec.model_source), tokenizer,
                 fit_ds, select_ds, cfg, device, cfg.stage_dir(out_root, "predictor"), wb,
+                on_epoch_end=on_epoch_end,
             ),
         )
         if on_stage_end is not None:
@@ -151,13 +155,19 @@ def _run_stage(stage: str, cfg, meta: dict, use_wandb: bool | None, work) -> dic
 
 
 def _stage_b_tokenizer(cfg, out_root: Path, spec) -> AxiomTokenizer:
-    """Stage B consumes Stage A's tokenizer by default; `stage_b.tokenizer: init`
-    opts into the un-finetuned one explicitly — never by silent fallback."""
+    """Stage B consumes Stage A's tokenizer by default. `stage_b.tokenizer: init`
+    opts into the un-finetuned one, and a `ckpts/...` source reuses a previous
+    run's tokenizer (so a Stage-B-only run isolates its one change instead of
+    retraining an identical Stage A) — never by silent fallback."""
     source = cfg.stage_b.get("tokenizer", "stage_a")
     if source == "init":
         return AxiomTokenizer.from_pretrained(spec.tokenizer_source)
+    if source.startswith("ckpts/"):
+        return AxiomTokenizer.from_pretrained(_resolve_source(source))
     if source != "stage_a":
-        raise ValueError(f"stage_b.tokenizer {source!r} not in ('stage_a', 'init')")
+        raise ValueError(
+            f"stage_b.tokenizer {source!r} not in ('stage_a', 'init') and not a ckpts/ path"
+        )
     best = cfg.stage_dir(out_root, "tokenizer") / "best_model"
     if not best.exists():
         raise FileNotFoundError(
