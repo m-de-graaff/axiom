@@ -145,7 +145,12 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
       Per-stage volume commits saved Stage A's checkpoint but not mid-stage progress
 - [ ] **P3-06** Full-corpus Stage A on A100-80GB
 - [ ] **P3-07** Full-corpus Stage B on A100-80GB → `axiom-ft-102m-crypto1-512-v0`
-- [ ] **P3-08** Harness eval: comparison table vs zero-shot + all baselines, committed to `reports/`
+- [~] **P3-08** Harness eval: comparison table vs zero-shot + all baselines. First look done
+      on val (run `20260830T032521-val-9c4faa1`, W&B `umuxg5sy`,
+      `docs/results/p3-08-ft-v0-val.md`): ft-v0 cuts MAE 27–37% and moves coverage
+      0.32–0.45 → 0.48–0.59 (vs 0.80 nominal) — the fan's miscalibration looks like
+      domain shift, not architecture. RankIC unchanged within val's power; economics
+      still negative panel-wide. Full table incl. baselines is the M1-record eval
 - [ ] **P3-09** Iterate (one change per run, each logged) until M1 criteria met — budget 5–15 runs
 - [ ] **GATE M1 ✅** net-of-cost RankIC > zero-shot **and** > LightGBM (positive t-stat) · coverage within ±10pp · tripwire strategy not bleeding after fees. *If LightGBM keeps winning: stop, rethink features/horizons/universe — do NOT proceed to scaling.*
       **The verdict eval runs on Modal L4** from the frozen `default.yaml` — Modal is the
