@@ -20,7 +20,8 @@
 seed: 1337
 data: configs/data/crypto_v1.yaml
 split: val
-models: [axiom-zero-mini, axiom-zero-small, axiom-zero-base]
+# Phase 3 candidates join this list as they exist; default.yaml stays frozen.
+models: [axiom-zero-mini, axiom-zero-small, axiom-zero-base, axiom-ft-25m-crypto1-512-v0]
 baselines:
   persistence: true
   ewma: true

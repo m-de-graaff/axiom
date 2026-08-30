@@ -5,13 +5,21 @@ Fine-tunes get added here as new entries (`axiom-ft-102m-crypto1-512-v0` -> a
 Modal volume path or HF repo), never by passing a path around.
 """
 
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 
 from .predictor import AxiomPredictor
 from .tokenizer import AxiomTokenizer
 from .transformer import Axiom
+
+# Fine-tuned checkpoints live under one root per machine: `data/checkpoints`
+# locally (pulled from the volume), `/ckpts` on Modal. Sources with a `ckpts/`
+# prefix resolve against it, so a registry name means the same weights everywhere.
+CKPTS_ROOT_ENV = "AXIOM_CKPTS_ROOT"
+DEFAULT_CKPTS_ROOT = "data/checkpoints"
 
 
 @dataclass(frozen=True)
@@ -45,7 +53,30 @@ REGISTRY: dict[str, ModelSpec] = {
         max_context=512,
         params_m=102.3,
     ),
+    # First fine-tune (P3-03/04): crypto_v0.yaml on the 1h corpus, Modal L4,
+    # W&B 6swnysvk (stage A) + 4jf1fhsy (stage B). Best predictor = epoch 2 of 20.
+    "axiom-ft-25m-crypto1-512-v0": ModelSpec(
+        model_source="ckpts/axiom-ft-25m-crypto1-512-v0/predictor/best_model",
+        tokenizer_source="ckpts/axiom-ft-25m-crypto1-512-v0/tokenizer/best_model",
+        max_context=512,
+        params_m=24.7,
+    ),
 }
+
+
+def _resolve_source(source: str) -> str:
+    """`ckpts/...` sources resolve against the per-machine checkpoint root."""
+    if not source.startswith("ckpts/"):
+        return source
+    root = Path(os.environ.get(CKPTS_ROOT_ENV, DEFAULT_CKPTS_ROOT))
+    resolved = root / source.removeprefix("ckpts/")
+    if not resolved.exists():
+        raise FileNotFoundError(
+            f"{resolved} missing — pull it: modal volume get axiom-ckpts "
+            f"{source.removeprefix('ckpts/').split('/')[0]} {root} "
+            f"(or set {CKPTS_ROOT_ENV})"
+        )
+    return str(resolved)
 
 
 def resolve(name: str) -> ModelSpec:
@@ -67,8 +98,8 @@ def default_device() -> str:
 def load_predictor(name: str, device: str | None = None, **kwargs) -> AxiomPredictor:
     """Load a registered model + its tokenizer and return a ready AxiomPredictor."""
     spec = resolve(name)
-    tokenizer = AxiomTokenizer.from_pretrained(spec.tokenizer_source)
-    model = Axiom.from_pretrained(spec.model_source)
+    tokenizer = AxiomTokenizer.from_pretrained(_resolve_source(spec.tokenizer_source))
+    model = Axiom.from_pretrained(_resolve_source(spec.model_source))
     return AxiomPredictor(
         model,
         tokenizer,

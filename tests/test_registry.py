@@ -52,6 +52,25 @@ def test_load_predictor_passes_the_registered_sources_and_context(monkeypatch):
     assert kwargs == {"device": "cpu", "max_context": 2048}
 
 
+def test_ckpts_sources_resolve_against_the_configured_root(monkeypatch, tmp_path):
+    best = tmp_path / "axiom-ft-25m-crypto1-512-v0" / "predictor" / "best_model"
+    best.mkdir(parents=True)
+    monkeypatch.setenv(registry.CKPTS_ROOT_ENV, str(tmp_path))
+
+    resolved = registry._resolve_source("ckpts/axiom-ft-25m-crypto1-512-v0/predictor/best_model")
+    assert resolved == str(best)
+    # Non-ckpts sources (HF repos) pass through untouched.
+    assert registry._resolve_source("NeoQuasar/Kronos-small") == "NeoQuasar/Kronos-small"
+
+
+def test_ckpts_source_missing_on_disk_fails_with_the_pull_command(monkeypatch, tmp_path):
+    monkeypatch.setenv(registry.CKPTS_ROOT_ENV, str(tmp_path))
+
+    with pytest.raises(FileNotFoundError) as exc:
+        registry._resolve_source("ckpts/axiom-ft-25m-crypto1-512-v0/predictor/best_model")
+    assert "modal volume get" in str(exc.value)
+
+
 def test_axiom_classes_stay_weight_compatible_with_upstream_kronos():
     # CLAUDE.md: Axiom* must keep loading NeoQuasar/Kronos-* checkpoints.
     from axiom_model._kronos import Kronos, KronosPredictor, KronosTokenizer

@@ -125,14 +125,24 @@ Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked (note why
       init retargeted to `axiom-zero-small` per P3-01. Guards: `splits.*: test` refused,
       window must fit `max_context`, stale manifest refused. CPU tests in
       `tests/test_train.py`; a GPU smoke run is P3-03's first step
-- [ ] **P3-03** *(GPU: XTX overnight or Modal A10G/L4)* Stage A (tokenizer) subset fine-tune
-- [ ] **P3-04** *(GPU: XTX overnight or Modal A10G/L4)* Stage B (predictor) subset fine-tune
+- [x] **P3-03** Stage A tokenizer fine-tune — ran on **Modal L4** (2026-08-29/30), W&B
+      `6swnysvk`, `configs/finetune/crypto_v0.yaml` verbatim. Val recon 0.0066 → **0.0031**,
+      still improving at epoch 30/30; best checkpoint on the `axiom-ckpts` volume
+- [x] **P3-04** Stage B predictor fine-tune — same run, W&B `4jf1fhsy`. Best val CE
+      **2.7930 at epoch 2 of 20**; val worsens monotonically after (2.79 → 2.89), train
+      keeps falling — **Stage B overfits this corpus almost immediately**, reproduced in
+      both attempts (the run was preempted at ~95% and retried from scratch; see P3-05).
+      Best-epoch selection saved the epoch-2 weights. Registered as
+      `axiom-ft-25m-crypto1-512-v0` (`ckpts/` source, resolved via `AXIOM_CKPTS_ROOT`).
+      The legitimate single change for run 2: cut Stage B epochs (or LR)
 - [~] **P3-05** Modal training app (`infra/modal_app/train.py`): checkpoints to volume, resume, W&B.
       **Verified end-to-end 2026-08-29 on an L4** (smoke: both stages on the volume corpus —
       1,474,084 train windows — bf16, checkpoints committed to `axiom-ckpts` under
       `axiom-ft-smoke/`, ~$0.20). GPU via `AXIOM_TRAIN_GPU` env (default A100-80GB per
-      policy; set `L4`/`A10G` for subset runs). Still owed: **resume from checkpoint** and
-      one W&B-enabled run on Modal (secret is attached; smoke ran with wandb off)
+      policy; set `L4`/`A10G` for subset runs). W&B on Modal verified live during P3-03/04.
+      Still owed, now urgent: **resume from checkpoint** — the P3-03/04 run was preempted
+      at ~95% and the auto-retry restarted from Stage A scratch (~$3 and ~4h burned).
+      Per-stage volume commits saved Stage A's checkpoint but not mid-stage progress
 - [ ] **P3-06** Full-corpus Stage A on A100-80GB
 - [ ] **P3-07** Full-corpus Stage B on A100-80GB → `axiom-ft-102m-crypto1-512-v0`
 - [ ] **P3-08** Harness eval: comparison table vs zero-shot + all baselines, committed to `reports/`
