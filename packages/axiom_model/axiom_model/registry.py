@@ -61,6 +61,14 @@ REGISTRY: dict[str, ModelSpec] = {
         max_context=512,
         params_m=24.7,
     ),
+    # Run 2 (crypto_v1.yaml): Stage B cut to 3 epochs, v0's tokenizer reused —
+    # hence the v0 tokenizer_source. W&B 2ydtny0x; best val CE 2.7922 at epoch 3.
+    "axiom-ft-25m-crypto1-512-v1": ModelSpec(
+        model_source="ckpts/axiom-ft-25m-crypto1-512-v1/predictor/best_model",
+        tokenizer_source="ckpts/axiom-ft-25m-crypto1-512-v0/tokenizer/best_model",
+        max_context=512,
+        params_m=24.7,
+    ),
 }
 
 
