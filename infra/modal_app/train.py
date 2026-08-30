@@ -55,6 +55,7 @@ def train(config_yaml: str, stage: str = "all", git_sha: str = "") -> dict:
 
     sys.path.insert(0, "/root/packages/axiom_model")
     sys.path.insert(0, "/root/packages/axiom_data")
+    os.environ["AXIOM_CKPTS_ROOT"] = "/ckpts"  # registry ckpts/ sources live on the volume
     if git_sha:  # containers get the code, not the .git — see run.py/_git_sha
         os.environ["AXIOM_GIT_SHA"] = git_sha
     from axiom_model.train.finetune import run
